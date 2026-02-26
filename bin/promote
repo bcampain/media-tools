@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ERR_TRAP_FIRED="0"
+
+log_line() {
+  local logfile="$1"; shift
+  printf "%s\n" "$*" >> "$logfile"
+}
+
+notify_failure() {
+  # args: title, message
+  local title="$1"
+  local msg="$2"
+
+  # Make a one-line version for the logfile:
+  # turn literal '\n' sequences into ' | '
+  local msg_one_line="${msg//\\n/ | }"
+
+  if [[ -n "${STAGING_LOG:-}" && -f "${STAGING_LOG:-}" ]]; then
+    log_line "$STAGING_LOG" "$title"
+    log_line "$STAGING_LOG" "$msg_one_line"
+  fi
+
+  # Discord: keep the original msg with newlines
+  if command -v notify_discord >/dev/null 2>&1; then
+    notify_discord "$title" "$msg" "${STAGING_LOG:-}" || true
+  fi
+}
+
+on_err() {
+  local rc=$?
+  local line="${1:-unknown}"
+  local cmd="${2:-unknown}"
+
+  ERR_TRAP_FIRED="1"
+
+  # Always print to console
+  echo "ERROR: crashed (rc=$rc) at line $line: $cmd" >&2
+
+  notify_failure \
+    "❌ exception: promote" \
+    "Show: ${SHOW_NAME:-unknown} | run_id=${RUN_ID:-unknown}\nrc=$rc | line=$line\ncmd: $cmd"
+
+  exit "$rc"
+}
+
+on_exit() {
+  local rc=$?
+
+  # If ERR trap already handled it, don't double-notify here.
+  [[ "$ERR_TRAP_FIRED" == "1" ]] && return 0
+
+  # Only catch validation exits (explicit exit 2)
+  [[ "$rc" == "2" ]] || return 0
+
+  notify_failure \
+    "⚠️ validation failed: promote" \
+    "Show: ${SHOW_NAME:-unknown} | run_id=${RUN_ID:-unknown}\nExited with rc=2 (validation)."
+}
+
+die2() {  # validation failure
+  local reason="$1"
+  echo "VALIDATION: $reason" >&2
+  if [[ -n "${STAGING_LOG:-}" && -f "${STAGING_LOG:-}" ]]; then
+    log_line "$STAGING_LOG" "VALIDATION: $reason"
+  fi
+  exit 2
+}
+
+trap 'on_err "$LINENO" "$BASH_COMMAND"' ERR
+trap 'on_exit' EXIT
+
+RETENTION_DAYS="30"
+DRY_RUN="0"
+OVERWRITE="0"
+RUN_ID=""
+
+usage() {
+  echo "Usage: promote /staging/tv/<Show Name> [--run-id MMDDYYHHmmss] [--retention-days N] [--dry-run] [--overwrite]"
+  echo "  Note: overwrite is now the default behavior when a library file exists."
+  exit 1
+}
+
+timestamp_now() { date "+%Y-%m-%d %H:%M:%S %z"; }
+run_id_now() { date "+%m%d%y%H%M%S"; }
+
+pick_newest_log() {
+  local show_root="$1"
+  ls -1t "$show_root"/*-media-tools-*.log 2>/dev/null | head -n 1 || true
+}
+
+if [[ $# -lt 1 ]]; then usage; fi
+SHOW_ROOT="$1"; shift
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run-id) RUN_ID="${2:-}"; shift 2 ;;
+    --retention-days) RETENTION_DAYS="${2:-}"; shift 2 ;;
+    --dry-run) DRY_RUN="1"; shift ;;
+    --overwrite) OVERWRITE="1"; shift ;;
+    -h|--help) usage ;;
+    *) echo "Unknown arg: $1"; usage ;;
+  esac
+done
+
+if [[ ! "$SHOW_ROOT" =~ ^/staging/tv/.+[^/]$ ]]; then
+  die2 "SHOW_ROOT must be of the form /staging/tv/<Show Name> (show root only). Got: $SHOW_ROOT"
+fi
+if [[ ! -d "$SHOW_ROOT" ]]; then
+  die2 "Show root not found: $SHOW_ROOT"
+fi
+
+SHOW_NAME="$(basename "$SHOW_ROOT")"
+LIB_ROOT="/library/tv/$SHOW_NAME"
+INC_ROOT="/incoming/tv/$SHOW_NAME"
+ARCH_BASE="/staging/archive/tv/$SHOW_NAME"
+ARCH_DIR=""
+
+if [[ "$DRY_RUN" == "0" ]]; then
+  mkdir -p "$LIB_ROOT"
+fi
+
+# Decide log file
+if [[ -n "$RUN_ID" ]]; then
+  STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+else
+  STAGING_LOG="$(pick_newest_log "$SHOW_ROOT")"
+  if [[ -n "$STAGING_LOG" ]]; then
+    # try to infer run id from filename
+    RUN_ID="$(sed -n 's/.*-media-tools-\([0-9]\{12\}\)\.log/\1/p' <<<"$(basename "$STAGING_LOG")" | head -n 1)"
+  else
+    RUN_ID="$(run_id_now)"
+    STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+  fi
+fi
+
+START_TS="$(timestamp_now)"
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "📚 Step 3 of 3: Promote to Library started" "Show: ${SHOW_NAME} | run_id=${RUN_ID}" || true
+log_line "$STAGING_LOG" "${START_TS}  promote START"
+log_line "$STAGING_LOG" "  run_id=${RUN_ID}"
+log_line "$STAGING_LOG" "  staging=${SHOW_ROOT}"
+log_line "$STAGING_LOG" "  library=${LIB_ROOT}"
+log_line "$STAGING_LOG" "  incoming=${INC_ROOT}"
+log_line "$STAGING_LOG" "  archive_base=${ARCH_BASE}"
+log_line "$STAGING_LOG" "  retention_days=${RETENTION_DAYS}"
+log_line "$STAGING_LOG" "  overwrite=${OVERWRITE}"
+log_line "$STAGING_LOG" "  files:"
+
+# Fail if any .norm still present (ignore macOS AppleDouble sidecars like ._*)
+if find "$SHOW_ROOT" -type f -name "*.norm.mp4" ! -name "._*" -print -quit | grep -q .; then
+  echo "ERROR: .norm.mp4 files remain under staging show root. Run normalize_audio first." >&2
+  MSG="$(printf "Show: %s | run_id=%s\n.norm.mp4 files remain under staging show root. Run normalize_audio first." "$SHOW_NAME" "$RUN_ID")"
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "⚠️ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
+  exit 3
+fi
+
+mapfile -d '' FILES < <(
+  find "$SHOW_ROOT" -type f -name "*.mp4" ! -name "._*" ! -name "*.norm.mp4" ! -name "*.tmp" ! -name "*.tmp.mp4" -print0 | sort -z
+)
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  log_line "$STAGING_LOG" "    (none found)"
+  log_line "$STAGING_LOG" "promote END status=OK"
+  MSG="$(printf "Show: %s | run_id=%s\nNo final mp4 files found to promote. Nothing to do." "$SHOW_NAME" "$RUN_ID")"
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "⚠️ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
+  # still copy the log over
+  if [[ "$DRY_RUN" == "0" ]]; then
+    cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+  fi
+  exit 0
+fi
+
+FAILS=0
+CREATED=0
+OVERWRITTEN=0
+
+# Track which staging files are safe to delete after success
+declare -a DELETE_LATER=()
+
+for src in "${FILES[@]}"; do
+  rel="${src#$SHOW_ROOT/}"
+  dest="$LIB_ROOT/$rel"
+  dest_dir="$(dirname "$dest")"
+  mkdir -p "$dest_dir"
+
+  # If destination exists, we now overwrite by default.
+  dest_existed="0"
+  if [[ -f "$dest" ]]; then
+    dest_existed="1"
+  fi
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    if [[ "$dest_existed" == "1" ]]; then
+      log_line "$STAGING_LOG" "    DRYRUN(overwrite): $rel -> ${dest#/library/}"
+    else
+      log_line "$STAGING_LOG" "    DRYRUN: $rel -> ${dest#/library/}"
+    fi
+    continue
+  fi
+
+  tmp="${dest}.tmp.$$"
+  if rsync -a --inplace --partial --no-perms --no-owner --no-group --protect-args -- "$src" "$tmp"; then
+    mv -f "$tmp" "$dest"
+    if [[ "$dest_existed" == "1" ]]; then
+      log_line "$STAGING_LOG" "    OVERWROTE: $rel"
+      OVERWRITTEN=$((OVERWRITTEN+1))
+
+      MSG="$(printf "Show: %s | run_id=%s\nOverwrote: %s" "$SHOW_NAME" "$RUN_ID" "${dest#/library/}")"
+      command -v notify_discord >/dev/null 2>&1 && \
+        notify_discord "♻️ Promote: Overwrote existing library file" "$MSG" "$STAGING_LOG" || true
+    else
+      log_line "$STAGING_LOG" "    CREATED: $rel"
+      CREATED=$((CREATED+1))
+    fi
+
+    DELETE_LATER+=("$src")
+  else
+    rm -f "$tmp" || true
+    log_line "$STAGING_LOG" "    FAILED(copy): $rel"
+    FAILS=$((FAILS+1))
+  fi
+done
+
+if [[ "$FAILS" -gt 0 ]]; then
+  log_line "$STAGING_LOG" "promote END status=FAIL created=${CREATED} overwritten=${OVERWRITTEN} failed=${FAILS}"
+  MSG="$(printf "Show: %s | run_id=%s\nPromote failed for %d files.\nCreated: %d, Overwritten: %d, Failed: %d" \
+    "$SHOW_NAME" "$RUN_ID" "$FAILS" "$CREATED" "$OVERWRITTEN" "$FAILS")"
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "❌ Step 3 of 3: Promote to Library finished with errors" "$MSG" "$STAGING_LOG" || true
+  # Copy log to library anyway for diagnostics
+  if [[ "$DRY_RUN" == "0" ]]; then
+    cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+  fi
+  exit 4
+fi
+
+# Archive originals only after successful promote
+if [[ "$DRY_RUN" == "0" ]]; then
+  if [[ -d "$INC_ROOT" ]]; then
+    ARCH_DIR="$ARCH_BASE/_archived-${RUN_ID}"
+    mkdir -p "$ARCH_DIR"
+    if rsync -a --inplace --partial -rlt --no-perms --no-owner --no-group --protect-args -- "$INC_ROOT/" "$ARCH_DIR/"; then
+      log_line "$STAGING_LOG" "  archive: OK -> ${ARCH_DIR#/staging/}"
+
+      # NEW: archive *all* media-tools logs from the staging show root, not just $STAGING_LOG
+      shopt -s nullglob
+      for f in "$SHOW_ROOT"/*-media-tools-*.log; do
+        cp -f -- "$f" "$ARCH_DIR/$(basename "$f")"
+      done
+      shopt -u nullglob
+      log_line "$STAGING_LOG" "  archive_log: copied all -> ${ARCH_DIR#/staging/}"
+
+      rm -rf "$INC_ROOT"
+    else
+      log_line "$STAGING_LOG" "  archive: FAILED"
+      # Copy log then exit non-zero (archive failure is considered failure)
+      cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+      exit 5
+    fi
+  else
+    log_line "$STAGING_LOG" "  archive: SKIPPED (incoming show folder not found)"
+  fi
+else
+  log_line "$STAGING_LOG" "  archive: DRYRUN"
+fi
+
+# Prune archives older than retention days (per-show)
+if [[ "$DRY_RUN" == "0" ]]; then
+  if [[ -d "$ARCH_BASE" ]]; then
+    pruned=0
+    while IFS= read -r -d '' d; do
+      rm -rf "$d"
+      pruned=$((pruned+1))
+    done < <(find "$ARCH_BASE" -mindepth 1 -maxdepth 1 -type d -name "_archived-*" -mtime +"$RETENTION_DAYS" -print0)
+    log_line "$STAGING_LOG" "  archive_prune: removed=${pruned} older_than_days=${RETENTION_DAYS}"
+    if [[ "$pruned" -gt 0 ]]; then
+      MSG="$(printf "Show: %s | run_id=%s\nPruned %d archives older than %d days." "$SHOW_NAME" "$RUN_ID" "$pruned" "$RETENTION_DAYS")"
+      command -v notify_discord >/dev/null 2>&1 && \
+        notify_discord "⚠️ Step 3 of 3: Promote to Library archive prune" "$MSG" "$STAGING_LOG" || true
+    fi
+  else
+    log_line "$STAGING_LOG" "  archive_prune: none (no archive dir)"
+  fi
+else
+  log_line "$STAGING_LOG" "  archive_prune: DRYRUN older_than_days=${RETENTION_DAYS}"
+fi
+
+# Delete staging finals now that library is populated
+if [[ "$DRY_RUN" == "0" ]]; then
+  del=0
+  for f in "${DELETE_LATER[@]}"; do
+    rm -f "$f" && ((del++)) || true
+  done
+  # Remove empty dirs (including seasons). If show root becomes empty, it may be removed too.
+  find "$SHOW_ROOT" -type d -empty -delete || true
+  log_line "$STAGING_LOG" "  staging_cleanup: deleted_files=${del} (final mp4s)"
+  log_line "$STAGING_LOG" "  staging_cleanup: removing_show_root=${SHOW_ROOT}"
+else
+  log_line "$STAGING_LOG" "  staging_cleanup: DRYRUN"
+fi
+
+END_TS="$(timestamp_now)"
+log_line "$STAGING_LOG" "${END_TS}  promote END status=OK created=${CREATED} overwritten=${OVERWRITTEN} failed=0"
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "✅ Step 3 of 3: Promote to Library finished" \
+  "Show: ${SHOW_NAME} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
+  "$STAGING_LOG" || true
+
+# Copy final log into library show root
+if [[ "$DRY_RUN" == "0" ]]; then
+  cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+fi
+
+# Remove staging scaffolding (entire show root) after successful promote
+if [[ "$DRY_RUN" == "0" ]]; then
+  rm -rf "$SHOW_ROOT"
+fi
+
+exit 0

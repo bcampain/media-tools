@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'rc=$?; echo "ERROR: crashed (rc=$rc) at line $LINENO: $BASH_COMMAND" >&2' ERR
+
+# Usage:
+#   notify_discord "title" "message" ["logfile"]
+#
+# Requires: DISCORD_WEBHOOK_URL env var
+
+TITLE="${1:-}"
+MESSAGE="${2:-}"
+LOGFILE="${3:-}"
+
+if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+  echo "DISCORD_WEBHOOK_URL not set" >&2
+  exit 2
+fi
+
+# Optional log tail (kept short to avoid Discord limits)
+LOG_TAIL=""
+TRUNCATED="0"
+if [[ -n "$LOGFILE" && -f "$LOGFILE" ]]; then
+  # Grab tail, normalize line endings, escape backticks for code fence safety
+  LOG_TAIL="$(tail -n 25 "$LOGFILE" | sed 's/\r$//' | sed 's/`/\\`/g')"
+
+  # Hard cap to keep payload safely under Discord 2000-char limit.
+  # 1400 leaves room for title/message + code fences.
+  max_tail_chars=1400
+  if [[ "${#LOG_TAIL}" -gt "$max_tail_chars" ]]; then
+    LOG_TAIL="${LOG_TAIL:0:$max_tail_chars}"
+    TRUNCATED="1"
+  fi
+
+  if [[ "$TRUNCATED" == "1" ]]; then
+    LOG_TAIL="${LOG_TAIL}"$'\n'"...(log tail truncated)"
+  fi
+fi
+
+# Build content (Discord has message size limits; keep it concise)
+CONTENT="**${TITLE}**
+${MESSAGE}"
+
+if [[ -n "$LOG_TAIL" ]]; then
+  CONTENT="${CONTENT}
+\`\`\`
+${LOG_TAIL}
+\`\`\`"
+fi
+
+# Escape JSON safely with jq
+payload="$(jq -n --arg content "$CONTENT" '{content:$content}')"
+
+# Capture response body for debugging on non-2xx
+resp="$(mktemp)"
+code="$(curl -sS -o "$resp" -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -d "$payload" \
+  "$DISCORD_WEBHOOK_URL" || echo "000")"
+
+echo "notify_discord http_code=$code" >&2
+
+if [[ "$code" != "204" && "$code" != "200" ]]; then
+  # Discord returns JSON explaining why (e.g., "Must be 2000 or fewer...")
+  echo "notify_discord response: $(tr '\n' ' ' <"$resp")" >&2
+  rm -f "$resp"
+  exit 1
+fi
+
+rm -f "$resp"
+exit 0
