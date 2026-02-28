@@ -40,7 +40,7 @@ on_err() {
 
   notify_failure \
     "❌ exception: promote" \
-    "Show: ${SHOW_NAME:-unknown} | run_id=${RUN_ID:-unknown}\nrc=$rc | line=$line\ncmd: $cmd"
+    "${TARGET_LABEL:-Target}: ${LABEL_VALUE:-unknown} | run_id=${RUN_ID:-unknown}\nrc=$rc | line=$line\ncmd: $cmd"
 
   exit "$rc"
 }
@@ -56,7 +56,7 @@ on_exit() {
 
   notify_failure \
     "⚠️ validation failed: promote" \
-    "Show: ${SHOW_NAME:-unknown} | run_id=${RUN_ID:-unknown}\nExited with rc=2 (validation)."
+    "${TARGET_LABEL:-Target}: ${LABEL_VALUE:-unknown} | run_id=${RUN_ID:-unknown}\nExited with rc=2 (validation)."
 }
 
 die2() {  # validation failure
@@ -77,8 +77,18 @@ OVERWRITE="0"
 RUN_ID=""
 
 usage() {
-  echo "Usage: promote /staging/tv/<Show Name> [--run-id MMDDYYHHmmss] [--retention-days N] [--dry-run] [--overwrite]"
+  echo "Usage:"
+  echo "  promote <target> [--run-id MMDDYYHHmmss] [--retention-days N] [--dry-run] [--overwrite]"
   echo "  Note: overwrite is now the default behavior when a library file exists."
+  echo ""
+  echo "Targets:"
+  echo "  TV (show root only):"
+  echo "    /staging/tv/<Show Name>"
+  echo "  Movies/Clips (dir or single file):"
+  echo "    /staging/movies[/subdir]"
+  echo "    /staging/movies/path/to/file.mp4"
+  echo "    /staging/clips[/subdir]"
+  echo "    /staging/clips/path/to/file.mp4"
   exit 1
 }
 
@@ -86,12 +96,86 @@ timestamp_now() { date "+%Y-%m-%d %H:%M:%S %z"; }
 run_id_now() { date "+%m%d%y%H%M%S"; }
 
 pick_newest_log() {
-  local show_root="$1"
-  ls -1t "$show_root"/*-media-tools-*.log 2>/dev/null | head -n 1 || true
+  local root="$1"
+  ls -1t "$root"/*-media-tools-*.log 2>/dev/null | head -n 1 || true
+}
+
+resolve_promote_target() {
+  # sets:
+  #   KIND=tv|movies|clips
+  #   STAGE_BASE=/staging/<kind>
+  #   IN_BASE=/incoming/<kind>
+  #   LIB_BASE=/library/<kind>
+  #   TARGET_MODE=dir|file
+  #   TARGET_PATH=(normalized)
+  local p="$1"
+
+  if [[ ! "$p" =~ ^/staging/ ]]; then
+    die2 "Target must be under /staging. Got: $p"
+  fi
+
+  if [[ "$p" == /staging/tv/* ]]; then
+    KIND="tv"
+    STAGE_BASE="/staging/tv"
+    IN_BASE="/incoming/tv"
+    LIB_BASE="/library/tv"
+
+    [[ -d "$p" ]] || die2 "TV target must be a directory show root: /staging/tv/<Show Name>"
+    [[ "$p" =~ ^/staging/tv/[^/]+$ ]] || die2 "TV target must be show root only: /staging/tv/<Show Name>"
+
+    TARGET_MODE="dir"
+    TARGET_PATH="$p"
+    return 0
+  fi
+
+  if [[ "$p" == /staging/movies* ]]; then
+    KIND="movies"
+    STAGE_BASE="/staging/movies"
+    IN_BASE="/incoming/movies"
+    LIB_BASE="/library/movies"
+  elif [[ "$p" == /staging/clips* ]]; then
+    KIND="clips"
+    STAGE_BASE="/staging/clips"
+    IN_BASE="/incoming/clips"
+    LIB_BASE="/library/clips"
+  else
+    die2 "Target must live under /staging/tv, /staging/movies, or /staging/clips. Got: $p"
+  fi
+
+  if [[ -d "$p" ]]; then
+    TARGET_MODE="dir"
+    TARGET_PATH="$p"
+  elif [[ -f "$p" && "$p" =~ \.mp4$ ]]; then
+    TARGET_MODE="file"
+    TARGET_PATH="$p"
+  else
+    die2 "Target must be a directory or a single .mp4 file. Got: $p"
+  fi
+}
+
+find_incoming_original() {
+  # movies/clips only:
+  # rel_mp4 is relative to STAGE_BASE, e.g. Foo/Alien.mp4
+  local rel_mp4="$1"
+  local rel_dir base stem dir ext
+
+  rel_dir="$(dirname "$rel_mp4")"
+  base="$(basename "$rel_mp4")"
+  stem="${base%.mp4}"
+  dir="$IN_BASE/$rel_dir"
+
+  for ext in mkv mp4 m4v; do
+    if [[ -f "$dir/$stem.$ext" ]]; then
+      printf "%s\n" "$dir/$stem.$ext"
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 if [[ $# -lt 1 ]]; then usage; fi
-SHOW_ROOT="$1"; shift
+TARGET="$1"; shift
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -104,18 +188,33 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! "$SHOW_ROOT" =~ ^/staging/tv/.+[^/]$ ]]; then
-  die2 "SHOW_ROOT must be of the form /staging/tv/<Show Name> (show root only). Got: $SHOW_ROOT"
-fi
-if [[ ! -d "$SHOW_ROOT" ]]; then
-  die2 "Show root not found: $SHOW_ROOT"
-fi
+resolve_promote_target "$TARGET"
 
-SHOW_NAME="$(basename "$SHOW_ROOT")"
-LIB_ROOT="/library/tv/$SHOW_NAME"
-INC_ROOT="/incoming/tv/$SHOW_NAME"
-ARCH_BASE="/staging/archive/tv/$SHOW_NAME"
+SHOW_ROOT=""
+SHOW_NAME=""
+LIB_ROOT=""
+INC_ROOT=""
+ARCH_BASE=""
 ARCH_DIR=""
+TARGET_LABEL=""
+LABEL_VALUE=""
+
+if [[ "$KIND" == "tv" ]]; then
+  SHOW_ROOT="$TARGET_PATH"
+  SHOW_NAME="$(basename "$SHOW_ROOT")"
+  LIB_ROOT="$LIB_BASE/$SHOW_NAME"
+  INC_ROOT="$IN_BASE/$SHOW_NAME"
+  ARCH_BASE="/staging/archive/tv/$SHOW_NAME"
+  TARGET_LABEL="Show"
+  LABEL_VALUE="$SHOW_NAME"
+else
+  # movies/clips
+  LIB_ROOT="$LIB_BASE"
+  INC_ROOT="$IN_BASE"
+  ARCH_BASE="/staging/archive/$KIND"
+  TARGET_LABEL="Kind"
+  LABEL_VALUE="$KIND"
+fi
 
 if [[ "$DRY_RUN" == "0" ]]; then
   mkdir -p "$LIB_ROOT"
@@ -123,48 +222,90 @@ fi
 
 # Decide log file
 if [[ -n "$RUN_ID" ]]; then
-  STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+  if [[ "$KIND" == "tv" ]]; then
+    STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+  else
+    mkdir -p "$STAGE_BASE"
+    STAGING_LOG="$STAGE_BASE/${KIND}-media-tools-${RUN_ID}.log"
+  fi
 else
-  STAGING_LOG="$(pick_newest_log "$SHOW_ROOT")"
+  if [[ "$KIND" == "tv" ]]; then
+    STAGING_LOG="$(pick_newest_log "$SHOW_ROOT")"
+  else
+    mkdir -p "$STAGE_BASE"
+    STAGING_LOG="$(pick_newest_log "$STAGE_BASE")"
+  fi
+
   if [[ -n "$STAGING_LOG" ]]; then
     # try to infer run id from filename
     RUN_ID="$(sed -n 's/.*-media-tools-\([0-9]\{12\}\)\.log/\1/p' <<<"$(basename "$STAGING_LOG")" | head -n 1)"
   else
     RUN_ID="$(run_id_now)"
-    STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+    if [[ "$KIND" == "tv" ]]; then
+      STAGING_LOG="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
+    else
+      STAGING_LOG="$STAGE_BASE/${KIND}-media-tools-${RUN_ID}.log"
+    fi
   fi
 fi
 
 START_TS="$(timestamp_now)"
-command -v notify_discord >/dev/null 2>&1 && \
-  notify_discord "📚 Step 3 of 3: Promote to Library started" "Show: ${SHOW_NAME} | run_id=${RUN_ID}" || true
+if [[ "$KIND" == "tv" ]]; then
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "📚 Step 3 of 3: Promote to Library started" "Show: ${SHOW_NAME} | run_id=${RUN_ID}" || true
+else
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "📚 Step 3 of 3: Promote to Library started" "Kind: ${KIND} | run_id=${RUN_ID}\nTarget: ${TARGET_PATH}" || true
+fi
+
 log_line "$STAGING_LOG" "${START_TS}  promote START"
 log_line "$STAGING_LOG" "  run_id=${RUN_ID}"
-log_line "$STAGING_LOG" "  staging=${SHOW_ROOT}"
+log_line "$STAGING_LOG" "  staging=${TARGET_PATH}"
 log_line "$STAGING_LOG" "  library=${LIB_ROOT}"
 log_line "$STAGING_LOG" "  incoming=${INC_ROOT}"
 log_line "$STAGING_LOG" "  archive_base=${ARCH_BASE}"
 log_line "$STAGING_LOG" "  retention_days=${RETENTION_DAYS}"
 log_line "$STAGING_LOG" "  overwrite=${OVERWRITE}"
+log_line "$STAGING_LOG" "  kind=${KIND}"
 log_line "$STAGING_LOG" "  files:"
 
-# Fail if any .norm still present (ignore macOS AppleDouble sidecars like ._*)
-if find "$SHOW_ROOT" -type f -name "*.norm.mp4" ! -name "._*" -print -quit | grep -q .; then
-  echo "ERROR: .norm.mp4 files remain under staging show root. Run normalize_audio first." >&2
-  MSG="$(printf "Show: %s | run_id=%s\n.norm.mp4 files remain under staging show root. Run normalize_audio first." "$SHOW_NAME" "$RUN_ID")"
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "⚠️ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
-  exit 3
+# Fail if any .norm still present for directory targets (ignore macOS AppleDouble sidecars like ._*)
+if [[ "$TARGET_MODE" == "dir" ]]; then
+  if find "$TARGET_PATH" -type f -name "*.norm.mp4" ! -name "._*" -print -quit | grep -q .; then
+    echo "ERROR: .norm.mp4 files remain under target. Run normalize_audio first." >&2
+    if [[ "$KIND" == "tv" ]]; then
+      MSG="$(printf "Show: %s | run_id=%s\n.norm.mp4 files remain under staging show root. Run normalize_audio first." "$SHOW_NAME" "$RUN_ID")"
+    else
+      MSG="$(printf "Kind: %s | run_id=%s\n.norm.mp4 files remain under target. Run normalize_audio first.\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
+    fi
+    command -v notify_discord >/dev/null 2>&1 && \
+      notify_discord "⚠️ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
+    exit 3
+  fi
+else
+  # single-file target: refuse promoting .norm.mp4 explicitly
+  if [[ "$TARGET_PATH" =~ \.norm\.mp4$ ]]; then
+    die2 "Refusing to promote a .norm.mp4 file. Normalize first (expects final .mp4). Got: $TARGET_PATH"
+  fi
 fi
 
-mapfile -d '' FILES < <(
-  find "$SHOW_ROOT" -type f -name "*.mp4" ! -name "._*" ! -name "*.norm.mp4" ! -name "*.tmp" ! -name "*.tmp.mp4" -print0 | sort -z
-)
+FILES=()
+if [[ "$TARGET_MODE" == "file" ]]; then
+  FILES=("$TARGET_PATH")
+else
+  mapfile -d '' FILES < <(
+    find "$TARGET_PATH" -type f -name "*.mp4" ! -name "._*" ! -name "*.norm.mp4" ! -name "*.tmp" ! -name "*.tmp.mp4" -print0 | sort -z
+  )
+fi
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
   log_line "$STAGING_LOG" "    (none found)"
   log_line "$STAGING_LOG" "promote END status=OK"
-  MSG="$(printf "Show: %s | run_id=%s\nNo final mp4 files found to promote. Nothing to do." "$SHOW_NAME" "$RUN_ID")"
+  if [[ "$KIND" == "tv" ]]; then
+    MSG="$(printf "Show: %s | run_id=%s\nNo final mp4 files found to promote. Nothing to do." "$SHOW_NAME" "$RUN_ID")"
+  else
+    MSG="$(printf "Kind: %s | run_id=%s\nNo final mp4 files found to promote. Nothing to do.\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
+  fi
   command -v notify_discord >/dev/null 2>&1 && \
     notify_discord "⚠️ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
   # still copy the log over
@@ -182,8 +323,16 @@ OVERWRITTEN=0
 declare -a DELETE_LATER=()
 
 for src in "${FILES[@]}"; do
-  rel="${src#$SHOW_ROOT/}"
-  dest="$LIB_ROOT/$rel"
+  if [[ "$KIND" == "tv" ]]; then
+    rel="${src#$SHOW_ROOT/}"
+    dest="$LIB_ROOT/$rel"
+  else
+    # movies/clips: relative to STAGE_BASE
+    rel="${src#$STAGE_BASE/}"
+    rel="${rel#/}"
+    dest="$LIB_ROOT/$rel"
+  fi
+
   dest_dir="$(dirname "$dest")"
   mkdir -p "$dest_dir"
 
@@ -209,7 +358,12 @@ for src in "${FILES[@]}"; do
       log_line "$STAGING_LOG" "    OVERWROTE: $rel"
       OVERWRITTEN=$((OVERWRITTEN+1))
 
-      MSG="$(printf "Show: %s | run_id=%s\nOverwrote: %s" "$SHOW_NAME" "$RUN_ID" "${dest#/library/}")"
+      if [[ "$KIND" == "tv" ]]; then
+        MSG="$(printf "Show: %s | run_id=%s\nOverwrote: %s" "$SHOW_NAME" "$RUN_ID" "${dest#/library/}")"
+      else
+        MSG="$(printf "Kind: %s | run_id=%s\nOverwrote: %s" "$KIND" "$RUN_ID" "${dest#/library/}")"
+      fi
+
       command -v notify_discord >/dev/null 2>&1 && \
         notify_discord "♻️ Promote: Overwrote existing library file" "$MSG" "$STAGING_LOG" || true
     else
@@ -227,8 +381,15 @@ done
 
 if [[ "$FAILS" -gt 0 ]]; then
   log_line "$STAGING_LOG" "promote END status=FAIL created=${CREATED} overwritten=${OVERWRITTEN} failed=${FAILS}"
-  MSG="$(printf "Show: %s | run_id=%s\nPromote failed for %d files.\nCreated: %d, Overwritten: %d, Failed: %d" \
-    "$SHOW_NAME" "$RUN_ID" "$FAILS" "$CREATED" "$OVERWRITTEN" "$FAILS")"
+
+  if [[ "$KIND" == "tv" ]]; then
+    MSG="$(printf "Show: %s | run_id=%s\nPromote failed for %d files.\nCreated: %d, Overwritten: %d, Failed: %d" \
+      "$SHOW_NAME" "$RUN_ID" "$FAILS" "$CREATED" "$OVERWRITTEN" "$FAILS")"
+  else
+    MSG="$(printf "Kind: %s | run_id=%s\nPromote failed for %d files.\nCreated: %d, Overwritten: %d, Failed: %d" \
+      "$KIND" "$RUN_ID" "$FAILS" "$CREATED" "$OVERWRITTEN" "$FAILS")"
+  fi
+
   command -v notify_discord >/dev/null 2>&1 && \
     notify_discord "❌ Step 3 of 3: Promote to Library finished with errors" "$MSG" "$STAGING_LOG" || true
   # Copy log to library anyway for diagnostics
@@ -243,32 +404,68 @@ if [[ "$DRY_RUN" == "0" ]]; then
   if [[ -d "$INC_ROOT" ]]; then
     ARCH_DIR="$ARCH_BASE/_archived-${RUN_ID}"
     mkdir -p "$ARCH_DIR"
-    if rsync -a --inplace --partial -rlt --no-perms --no-owner --no-group --protect-args -- "$INC_ROOT/" "$ARCH_DIR/"; then
-      log_line "$STAGING_LOG" "  archive: OK -> ${ARCH_DIR#/staging/}"
 
-      # NEW: archive *all* media-tools logs from the staging show root, not just $STAGING_LOG
-      shopt -s nullglob
-      for f in "$SHOW_ROOT"/*-media-tools-*.log; do
-        cp -f -- "$f" "$ARCH_DIR/$(basename "$f")"
-      done
-      shopt -u nullglob
-      log_line "$STAGING_LOG" "  archive_log: copied all -> ${ARCH_DIR#/staging/}"
+    if [[ "$KIND" == "tv" ]]; then
+      # Archive whole incoming show folder, archive all logs, then delete incoming show folder
+      if rsync -a --inplace --partial -rlt --no-perms --no-owner --no-group --protect-args -- "$INC_ROOT/" "$ARCH_DIR/"; then
+        log_line "$STAGING_LOG" "  archive: OK -> ${ARCH_DIR#/staging/}"
 
-      rm -rf "$INC_ROOT"
+        # archive *all* media-tools logs from the staging show root, not just $STAGING_LOG
+        shopt -s nullglob
+        for f in "$SHOW_ROOT"/*-media-tools-*.log; do
+          cp -f -- "$f" "$ARCH_DIR/$(basename "$f")"
+        done
+        shopt -u nullglob
+        log_line "$STAGING_LOG" "  archive_log: copied all -> ${ARCH_DIR#/staging/}"
+
+        rm -rf "$INC_ROOT"
+      else
+        log_line "$STAGING_LOG" "  archive: FAILED"
+        # Copy log then exit non-zero (archive failure is considered failure)
+        cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+        exit 5
+      fi
     else
-      log_line "$STAGING_LOG" "  archive: FAILED"
-      # Copy log then exit non-zero (archive failure is considered failure)
-      cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
-      exit 5
+      # movies/clips: archive + delete per-file originals (safe; never rm -rf incoming base)
+      for staged in "${DELETE_LATER[@]}"; do
+        rel_mp4="${staged#$STAGE_BASE/}"
+        rel_mp4="${rel_mp4#/}"
+
+        if orig="$(find_incoming_original "$rel_mp4")"; then
+          rel_orig="${orig#$IN_BASE/}"
+          rel_orig="${rel_orig#/}"
+          dest_dir="$ARCH_DIR/$(dirname "$rel_orig")"
+          mkdir -p "$dest_dir"
+
+          if rsync -a --inplace --partial -rlt --no-perms --no-owner --no-group --protect-args -- "$orig" "$dest_dir/"; then
+            rm -f "$orig" || true
+            log_line "$STAGING_LOG" "  archive: OK original -> ${dest_dir#/staging/}/$(basename "$orig")"
+          else
+            log_line "$STAGING_LOG" "  archive: FAILED original=$orig"
+            cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
+            exit 5
+          fi
+        else
+          log_line "$STAGING_LOG" "  archive: WARN no incoming original found for staged_rel=$rel_mp4"
+        fi
+      done
+
+      # keep at least the main log in the archive batch folder
+      cp -f "$STAGING_LOG" "$ARCH_DIR/$(basename "$STAGING_LOG")" || true
+
+      # clean empty dirs under incoming base
+      find "$IN_BASE" -type d -empty -delete 2>/dev/null || true
+
+      log_line "$STAGING_LOG" "  archive: OK -> ${ARCH_DIR#/staging/}"
     fi
   else
-    log_line "$STAGING_LOG" "  archive: SKIPPED (incoming show folder not found)"
+    log_line "$STAGING_LOG" "  archive: SKIPPED (incoming folder not found)"
   fi
 else
   log_line "$STAGING_LOG" "  archive: DRYRUN"
 fi
 
-# Prune archives older than retention days (per-show)
+# Prune archives older than retention days (per target archive base)
 if [[ "$DRY_RUN" == "0" ]]; then
   if [[ -d "$ARCH_BASE" ]]; then
     pruned=0
@@ -278,7 +475,11 @@ if [[ "$DRY_RUN" == "0" ]]; then
     done < <(find "$ARCH_BASE" -mindepth 1 -maxdepth 1 -type d -name "_archived-*" -mtime +"$RETENTION_DAYS" -print0)
     log_line "$STAGING_LOG" "  archive_prune: removed=${pruned} older_than_days=${RETENTION_DAYS}"
     if [[ "$pruned" -gt 0 ]]; then
-      MSG="$(printf "Show: %s | run_id=%s\nPruned %d archives older than %d days." "$SHOW_NAME" "$RUN_ID" "$pruned" "$RETENTION_DAYS")"
+      if [[ "$KIND" == "tv" ]]; then
+        MSG="$(printf "Show: %s | run_id=%s\nPruned %d archives older than %d days." "$SHOW_NAME" "$RUN_ID" "$pruned" "$RETENTION_DAYS")"
+      else
+        MSG="$(printf "Kind: %s | run_id=%s\nPruned %d archives older than %d days." "$KIND" "$RUN_ID" "$pruned" "$RETENTION_DAYS")"
+      fi
       command -v notify_discord >/dev/null 2>&1 && \
         notify_discord "⚠️ Step 3 of 3: Promote to Library archive prune" "$MSG" "$STAGING_LOG" || true
     fi
@@ -295,29 +496,51 @@ if [[ "$DRY_RUN" == "0" ]]; then
   for f in "${DELETE_LATER[@]}"; do
     rm -f "$f" && ((del++)) || true
   done
-  # Remove empty dirs (including seasons). If show root becomes empty, it may be removed too.
-  find "$SHOW_ROOT" -type d -empty -delete || true
-  log_line "$STAGING_LOG" "  staging_cleanup: deleted_files=${del} (final mp4s)"
-  log_line "$STAGING_LOG" "  staging_cleanup: removing_show_root=${SHOW_ROOT}"
+
+  if [[ "$KIND" == "tv" ]]; then
+    # Remove empty dirs; show root may be removed too
+    find "$SHOW_ROOT" -type d -empty -delete || true
+    log_line "$STAGING_LOG" "  staging_cleanup: deleted_files=${del} (final mp4s)"
+    log_line "$STAGING_LOG" "  staging_cleanup: removing_show_root=${SHOW_ROOT}"
+  else
+    # movies/clips: clean empty dirs under the TARGET_PATH but do not delete STAGE_BASE itself
+    if [[ "$TARGET_MODE" == "dir" ]]; then
+      # mindepth 1 prevents deleting the target dir itself
+      find "$TARGET_PATH" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    else
+      find "$(dirname "$TARGET_PATH")" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+    fi
+    log_line "$STAGING_LOG" "  staging_cleanup: deleted_files=${del} (final mp4s)"
+  fi
 else
   log_line "$STAGING_LOG" "  staging_cleanup: DRYRUN"
 fi
 
 END_TS="$(timestamp_now)"
 log_line "$STAGING_LOG" "${END_TS}  promote END status=OK created=${CREATED} overwritten=${OVERWRITTEN} failed=0"
-command -v notify_discord >/dev/null 2>&1 && \
-  notify_discord "✅ Step 3 of 3: Promote to Library finished" \
-  "Show: ${SHOW_NAME} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
-  "$STAGING_LOG" || true
 
-# Copy final log into library show root
+if [[ "$KIND" == "tv" ]]; then
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "✅ Step 3 of 3: Promote to Library finished" \
+    "Show: ${SHOW_NAME} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
+    "$STAGING_LOG" || true
+else
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "✅ Step 3 of 3: Promote to Library finished" \
+    "Kind: ${KIND} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
+    "$STAGING_LOG" || true
+fi
+
+# Copy final log into library root
 if [[ "$DRY_RUN" == "0" ]]; then
   cp -f "$STAGING_LOG" "$LIB_ROOT/$(basename "$STAGING_LOG")"
 fi
 
-# Remove staging scaffolding (entire show root) after successful promote
+# Remove staging scaffolding after successful promote
 if [[ "$DRY_RUN" == "0" ]]; then
-  rm -rf "$SHOW_ROOT"
+  if [[ "$KIND" == "tv" ]]; then
+    rm -rf "$SHOW_ROOT"
+  fi
 fi
 
 exit 0
