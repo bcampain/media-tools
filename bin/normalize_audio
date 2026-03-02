@@ -274,12 +274,12 @@ fi
 
 START_TS="$(timestamp_now)"
 if [[ "$KIND" == "tv" ]]; then
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "🔉 Step 2 of 3: Normalize Audio started" "Show: ${SHOW_NAME} | run_id=${RUN_ID}" || true
+  MSG="$(printf "Show: %s | run_id=%s" "$SHOW_NAME" "$RUN_ID")"
 else
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "🔉 Step 2 of 3: Normalize Audio started" "Kind: ${KIND} | run_id=${RUN_ID}\nTarget: ${TARGET_PATH}" || true
+  MSG="$(printf "Kind: %s | run_id=%s\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
 fi
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "🔉 Step 2 of 3: Normalize Audio started" "$MSG" || true
 
 log_line "$LOGFILE" "${START_TS}  normalize_audio START"
 log_line "$LOGFILE" "  run_id=${RUN_ID}"
@@ -498,12 +498,12 @@ if [[ "$FAILS" -gt 0 ]]; then STATUS="PARTIAL"; fi
 log_line "$LOGFILE" "${END_TS}  normalize_audio END status=${STATUS} normalized=${CREATED} skipped=${SKIPPED} failed=${FAILS}"
 
 if [[ "$KIND" == "tv" ]]; then
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "✅ Step 2 of 3: Normalize Audio finished" "Show: ${SHOW_NAME} | run_id=${RUN_ID} | normalized=${CREATED} skipped=${SKIPPED} failed=${FAILS}" || true
+  MSG="$(printf "Show: %s | run_id=%s | normalized=%s skipped=%s failed=%s" "$SHOW_NAME" "$RUN_ID" "$CREATED" "$SKIPPED" "$FAILS")"
 else
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "✅ Step 2 of 3: Normalize Audio finished" "Kind: ${KIND} | run_id=${RUN_ID} | normalized=${CREATED} skipped=${SKIPPED} failed=${FAILS}" "$LOGFILE" || true
+  MSG="$(printf "Kind: %s | run_id=%s | normalized=%s skipped=%s failed=%s" "$KIND" "$RUN_ID" "$CREATED" "$SKIPPED" "$FAILS")"
 fi
+command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "✅ Step 2 of 3: Normalize Audio finished" "$MSG" "$LOGFILE" || true
 
 if [[ "$FAILS" -gt 0 ]]; then
   exit 3

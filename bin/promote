@@ -251,12 +251,12 @@ fi
 
 START_TS="$(timestamp_now)"
 if [[ "$KIND" == "tv" ]]; then
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "📚 Step 3 of 3: Promote to Library started" "Show: ${SHOW_NAME} | run_id=${RUN_ID}" || true
+  MSG="$(printf "Show: %s | run_id=%s" "$SHOW_NAME" "$RUN_ID")"
 else
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "📚 Step 3 of 3: Promote to Library started" "Kind: ${KIND} | run_id=${RUN_ID}\nTarget: ${TARGET_PATH}" || true
+  MSG="$(printf "Kind: %s | run_id=%s\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
 fi
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "📚 Step 3 of 3: Promote to Library started" "$MSG" || true
 
 log_line "$STAGING_LOG" "${START_TS}  promote START"
 log_line "$STAGING_LOG" "  run_id=${RUN_ID}"
@@ -520,16 +520,12 @@ END_TS="$(timestamp_now)"
 log_line "$STAGING_LOG" "${END_TS}  promote END status=OK created=${CREATED} overwritten=${OVERWRITTEN} failed=0"
 
 if [[ "$KIND" == "tv" ]]; then
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "✅ Step 3 of 3: Promote to Library finished" \
-    "Show: ${SHOW_NAME} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
-    "$STAGING_LOG" || true
+  MSG="$(printf "Show: %s | run_id=%s | created=%s overwritten=%s failed=0" "$SHOW_NAME" "$RUN_ID" "$CREATED" "$OVERWRITTEN")"
 else
-  command -v notify_discord >/dev/null 2>&1 && \
-    notify_discord "✅ Step 3 of 3: Promote to Library finished" \
-    "Kind: ${KIND} | run_id=${RUN_ID} | created=${CREATED} overwritten=${OVERWRITTEN} failed=0" \
-    "$STAGING_LOG" || true
+  MSG="$(printf "Kind: %s | run_id=%s | created=%s overwritten=%s failed=0" "$KIND" "$RUN_ID" "$CREATED" "$OVERWRITTEN")"
 fi
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "✅ Step 3 of 3: Promote to Library finished" "$MSG" "$STAGING_LOG" || true
 
 # Copy final log into library root
 if [[ "$DRY_RUN" == "0" ]]; then
