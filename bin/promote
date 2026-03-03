@@ -162,7 +162,11 @@ find_incoming_original() {
   rel_dir="$(dirname "$rel_mp4")"
   base="$(basename "$rel_mp4")"
   stem="${base%.mp4}"
-  dir="$IN_BASE/$rel_dir"
+  if [[ "$rel_dir" == "." ]]; then
+    dir="$IN_BASE"
+  else
+    dir="$IN_BASE/$rel_dir"
+  fi
 
   for ext in mkv mp4 m4v; do
     if [[ -f "$dir/$stem.$ext" ]]; then
@@ -434,7 +438,12 @@ if [[ "$DRY_RUN" == "0" ]]; then
         if orig="$(find_incoming_original "$rel_mp4")"; then
           rel_orig="${orig#$IN_BASE/}"
           rel_orig="${rel_orig#/}"
-          dest_dir="$ARCH_DIR/$(dirname "$rel_orig")"
+          orig_rel_dir="$(dirname "$rel_orig")"
+          if [[ "$orig_rel_dir" == "." ]]; then
+            dest_dir="$ARCH_DIR"
+          else
+            dest_dir="$ARCH_DIR/$orig_rel_dir"
+          fi
           mkdir -p "$dest_dir"
 
           if rsync -a --inplace --partial -rlt --no-perms --no-owner --no-group --protect-args -- "$orig" "$dest_dir/"; then

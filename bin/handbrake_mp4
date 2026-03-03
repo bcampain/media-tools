@@ -268,7 +268,11 @@ for in_file in "${FILES[@]}"; do
   base="$(basename "$in_file")"
   stem="${base%.*}"
 
-  out_dir="$OUT_ROOT/$rel_dir"
+  if [[ "$rel_dir" == "." ]]; then
+    out_dir="$OUT_ROOT"
+  else
+    out_dir="$OUT_ROOT/$rel_dir"
+  fi
   out_file="$out_dir/${stem}.norm.mp4"
   tmp_file="${out_file}.tmp"   # unchanged from v1
 
