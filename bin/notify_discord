@@ -27,12 +27,12 @@ if [[ -n "$LOGFILE" && -f "$LOGFILE" ]]; then
   # 1400 leaves room for title/message + code fences.
   max_tail_chars=1400
   if [[ "${#LOG_TAIL}" -gt "$max_tail_chars" ]]; then
-    LOG_TAIL="${LOG_TAIL:0:$max_tail_chars}"
+    LOG_TAIL="${LOG_TAIL: -$max_tail_chars}"
     TRUNCATED="1"
   fi
 
   if [[ "$TRUNCATED" == "1" ]]; then
-    LOG_TAIL="${LOG_TAIL}"$'\n'"...(log tail truncated)"
+    LOG_TAIL="...(log tail truncated)"$'\n'"${LOG_TAIL}"
   fi
 fi
 
