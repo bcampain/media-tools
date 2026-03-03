@@ -24,7 +24,7 @@ notify_failure() {
 
   # Discord: keep the original msg with newlines
   if command -v notify_discord >/dev/null 2>&1; then
-    notify_discord "$title" "$msg" "${STAGING_LOG:-}" || true
+    notify_discord "$title" "$(printf '%b' "$msg")" "${STAGING_LOG:-}" || true
   fi
 }
 
