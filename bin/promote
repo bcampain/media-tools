@@ -462,8 +462,8 @@ if [[ "$DRY_RUN" == "0" ]]; then
       # keep at least the main log in the archive batch folder
       cp -f "$STAGING_LOG" "$ARCH_DIR/$(basename "$STAGING_LOG")" || true
 
-      # clean empty dirs under incoming base
-      find "$IN_BASE" -type d -empty -delete 2>/dev/null || true
+      # clean empty dirs under incoming base (mindepth 1 preserves the base landing zone)
+      find "$IN_BASE" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 
       log_line "$STAGING_LOG" "  archive: OK -> ${ARCH_DIR#/staging/}"
     fi
