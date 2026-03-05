@@ -128,6 +128,16 @@ extract_loudnorm_json() {
   '
 }
 
+loudnorm_meas_valid() {
+  # Returns 0 (true) if the measured JSON has a numeric input_i in [-99, 0]
+  local json="$1"
+  local val
+  val="$(jq -r '.input_i' <<<"$json" 2>/dev/null || true)"
+  [[ -z "$val" || "$val" == "null" || "$val" == "-inf" || "$val" == "inf" ]] && return 1
+  # awk returns 0 if val is a number in range
+  awk -v v="$val" 'BEGIN { if (v+0 == v && v >= -99 && v <= 0) exit 0; else exit 1 }'
+}
+
 measure_loudnorm() {
   local in_file="$1"
   local filter="$2"
@@ -382,6 +392,16 @@ for in_file in "${FILES[@]}"; do
       meas_51="$(measure_loudnorm "$in_file" "")"
       meas_st="$(measure_loudnorm "$in_file" "pan=stereo|c0=0.5*FL+0.707*FC+0.5*BL|c1=0.5*FR+0.707*FC+0.5*BR,")"
 
+      if ! loudnorm_meas_valid "$meas_51" || ! loudnorm_meas_valid "$meas_st"; then
+        log_line "$LOGFILE" "    WARN (silent audio, skipping normalization) ($CURR of $COUNT): $rel -> ${out_file#$REL_BASE/}"
+        mv "$in_file" "$out_file"
+        MSG="$(printf "WARN silent audio (skipped normalization): %s" "${out_file#$REL_BASE/}")"
+        command -v notify_discord >/dev/null 2>&1 && \
+          notify_discord "⚠️ ffmpeg: Silent audio, skipped normalization ($CURR of $COUNT)" "$MSG" || true
+        SKIPPED=$((SKIPPED+1))
+        continue
+      fi
+
       f51="$(apply_two_pass_filter "$meas_51")"
       fst="$(apply_two_pass_filter "$meas_st")"
 
@@ -446,6 +466,17 @@ for in_file in "${FILES[@]}"; do
       fi
     else
       meas="$(measure_loudnorm "$in_file" "")"
+
+      if ! loudnorm_meas_valid "$meas"; then
+        log_line "$LOGFILE" "    WARN (silent audio, skipping normalization) ($CURR of $COUNT): $rel -> ${out_file#$REL_BASE/}"
+        mv "$in_file" "$out_file"
+        MSG="$(printf "WARN silent audio (skipped normalization): %s" "${out_file#$REL_BASE/}")"
+        command -v notify_discord >/dev/null 2>&1 && \
+          notify_discord "⚠️ ffmpeg: Silent audio, skipped normalization ($CURR of $COUNT)" "$MSG" || true
+        SKIPPED=$((SKIPPED+1))
+        continue
+      fi
+
       f="$(apply_two_pass_filter "$meas")"
       log_line "$LOGFILE" "      measure: $rel input_i=$(jq -r '.input_i' <<<"$meas") input_tp=$(jq -r '.input_tp' <<<"$meas") input_lra=$(jq -r '.input_lra' <<<"$meas") offset=$(jq -r '.target_offset' <<<"$meas")"
 
