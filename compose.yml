@@ -11,5 +11,6 @@ services:
       - /srv/media/incoming:/incoming
       - /srv/media/staging:/staging
       - /srv/media/library:/library
+      - /srv/media/logs:/logs
     working_dir: /work
     tty: true

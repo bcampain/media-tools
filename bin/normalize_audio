@@ -100,8 +100,8 @@ timestamp_now() { date "+%Y-%m-%d %H:%M:%S %z"; }
 run_id_now() { date "+%m%d%y%H%M%S"; }
 
 pick_newest_log() {
-  local dir="$1"
-  ls -1t "$dir"/*-media-tools-????????????.log 2>/dev/null | head -n 1 || true
+  local prefix="$1"
+  ls -1t /logs/${prefix}-media-tools-????????????.log 2>/dev/null | head -n 1 || true
 }
 
 ffprobe_channels() {
@@ -239,36 +239,21 @@ if [[ "$KIND" == "tv" ]]; then
   TARGET_LABEL="Show"
   LABEL_VALUE="$SHOW_NAME"
   REL_BASE="$SHOW_ROOT"
-
-  # TV log behavior: logs live in show root
-  if [[ -n "$RUN_ID" ]]; then
-    LOGFILE="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
-  else
-    LOGFILE="$(pick_newest_log "$SHOW_ROOT")"
-    if [[ -n "$LOGFILE" ]]; then
-      RUN_ID="$(sed -n 's/.*-media-tools-\([0-9]\{12\}\)\.log/\1/p' <<<"$(basename "$LOGFILE")" | head -n 1)"
-    else
-      RUN_ID="$(run_id_now)"
-      LOGFILE="$SHOW_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
-    fi
-  fi
 else
   TARGET_LABEL="Kind"
   LABEL_VALUE="$KIND"
   REL_BASE="$STAGE_BASE"
+fi
 
-  # Movies/clips log behavior: keep logs in /staging/<kind> so pipeline can find them consistently
-  mkdir -p "$STAGE_BASE"
-  if [[ -n "$RUN_ID" ]]; then
-    LOGFILE="$STAGE_BASE/${KIND}-media-tools-${RUN_ID}.log"
+if [[ -n "$RUN_ID" ]]; then
+  LOGFILE="/logs/${LABEL_VALUE}-media-tools-${RUN_ID}.log"
+else
+  LOGFILE="$(pick_newest_log "$LABEL_VALUE")"
+  if [[ -n "$LOGFILE" ]]; then
+    RUN_ID="$(sed -n 's/.*-media-tools-\([0-9]\{12\}\)\.log/\1/p' <<<"$(basename "$LOGFILE")" | head -n 1)"
   else
-    LOGFILE="$(pick_newest_log "$STAGE_BASE")"
-    if [[ -n "$LOGFILE" ]]; then
-      RUN_ID="$(sed -n 's/.*-media-tools-\([0-9]\{12\}\)\.log/\1/p' <<<"$(basename "$LOGFILE")" | head -n 1)"
-    else
-      RUN_ID="$(run_id_now)"
-      LOGFILE="$STAGE_BASE/${KIND}-media-tools-${RUN_ID}.log"
-    fi
+    RUN_ID="$(run_id_now)"
+    LOGFILE="/logs/${LABEL_VALUE}-media-tools-${RUN_ID}.log"
   fi
 fi
 

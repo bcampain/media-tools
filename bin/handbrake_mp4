@@ -194,14 +194,7 @@ RUN_ID="${RUN_ID:-$(run_id_now)}"
 
 mkdir -p "$OUT_ROOT"
 
-# Logfile behavior:
-# - TV stays exactly like v1 (in OUT_ROOT/showname-media-tools-RUNID.log)
-# - Movies/Clips: keep same naming pattern but keyed by kind, stored in /staging/<kind>
-if [[ "$KIND" == "tv" ]]; then
-  LOGFILE="$OUT_ROOT/${SHOW_NAME}-media-tools-${RUN_ID}.log"
-else
-  LOGFILE="$OUT_ROOT/${KIND}-media-tools-${RUN_ID}.log"
-fi
+LOGFILE="/logs/${LABEL_VALUE}-media-tools-${RUN_ID}.log"
 
 START_TS="$(timestamp_now)"
 if [[ "$KIND" == "tv" ]]; then
