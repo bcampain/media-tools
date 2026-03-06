@@ -3,3 +3,7 @@
 
 # Mac sidecar files
 .DS_Store
+
+# .NET build output
+mt/**/bin/
+mt/**/obj/
