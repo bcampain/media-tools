@@ -1,2 +1,5 @@
 # Env / Secrets
 .env
+
+# Mac sidecar files
+.DS_Store

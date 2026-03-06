@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ERR_TRAP_FIRED="0"
+
+log_line() {
+  local logfile="$1"
+  shift
+  printf "%s\n" "$*" >> "$logfile"
+}
+
+notify_failure() {
+  # args: title, message
+  local title="$1"
+  local msg="$2"
+
+  # Make a one-line version for the logfile:
+  # turn literal '\n' sequences into ' | '
+  local msg_one_line="${msg//\\n/ | }"
+
+  if [[ -n "${LOGFILE:-}" && -f "${LOGFILE:-}" ]]; then
+    log_line "$LOGFILE" "$title"
+    log_line "$LOGFILE" "$msg_one_line"
+  fi
+
+  # Discord: keep the original msg with newlines
+  if command -v notify_discord >/dev/null 2>&1; then
+    notify_discord "$title" "$(printf '%b' "$msg")" "${LOGFILE:-}" || true
+  fi
+}
+
+on_err() {
+  local rc=$?
+  local line="${1:-unknown}"
+  local cmd="${2:-unknown}"
+
+  ERR_TRAP_FIRED="1"
+
+  # Always print to console
+  echo "ERROR: crashed (rc=$rc) at line $line: $cmd" >&2
+
+  notify_failure \
+    "❌ exception: handbrake_mp4" \
+    "${TARGET_LABEL:-Show}: ${LABEL_VALUE:-unknown} | run_id=${RUN_ID:-unknown}\nrc=$rc | line=$line\ncmd: $cmd"
+
+  exit "$rc"
+}
+
+on_exit() {
+  local rc=$?
+
+  # If ERR trap already handled it, don't double-notify here.
+  [[ "$ERR_TRAP_FIRED" == "1" ]] && return 0
+
+  # Only catch validation exits (explicit exit 2)
+  [[ "$rc" == "2" ]] || return 0
+
+  notify_failure \
+    "⚠️ validation failed: handbrake_mp4" \
+    "${TARGET_LABEL:-Show}: ${LABEL_VALUE:-unknown} | run_id=${RUN_ID:-unknown}\nExited with rc=2 (validation)."
+}
+
+die2() {  # validation failure
+  local reason="$1"
+  echo "VALIDATION: $reason" >&2
+  if [[ -n "${LOGFILE:-}" && -f "${LOGFILE:-}" ]]; then
+    log_line "$LOGFILE" "VALIDATION: $reason"
+  fi
+  exit 2
+}
+
+trap 'on_err "$LINENO" "$BASH_COMMAND"' ERR
+trap 'on_exit' EXIT
+
+# Defaults (UNCHANGED from v1)
+QUALITY="23"
+PRESET="fast"
+MAX_DEPTH="3"
+DRY_RUN="0"
+FORCE="0"
+RUN_ID=""
+
+usage() {
+  echo "Usage:"
+  echo "  handbrake_mp4 <target> [--run-id MMDDYYHHmmss] [--quality RF] [--preset name] [--max-depth N] [--dry-run] [--force]"
+  echo ""
+  echo "Targets:"
+  echo "  TV (show root only):"
+  echo "    /incoming/tv/<Show Name>"
+  echo "  Movies/Clips (dir or single file):"
+  echo "    /incoming/movies[/subdir]"
+  echo "    /incoming/movies/path/to/file.(mkv|mp4|m4v)"
+  echo "    /incoming/clips[/subdir]"
+  echo "    /incoming/clips/path/to/file.(mkv|mp4|m4v)"
+  exit 1
+}
+
+timestamp_now() {
+  date "+%Y-%m-%d %H:%M:%S %z"
+}
+
+run_id_now() {
+  date "+%m%d%y%H%M%S"
+}
+
+is_video_file() {
+  [[ -f "$1" ]] && [[ "$1" =~ \.(mkv|mp4|m4v)$ ]] && [[ ! "$(basename "$1")" =~ ^\._ ]]
+}
+
+resolve_incoming_target() {
+  # sets:
+  #   KIND=tv|movies|clips
+  #   IN_BASE=/incoming/<kind>
+  #   STAGE_BASE=/staging/<kind>
+  #   TARGET_MODE=dir|file
+  #   TARGET_PATH=(normalized)
+  local p="$1"
+
+  [[ -e "$p" ]] || die2 "Target not found: $p"
+
+  if [[ "$p" == /incoming/tv/* ]]; then
+    KIND="tv"
+    IN_BASE="/incoming/tv"
+    STAGE_BASE="/staging/tv"
+
+    [[ -d "$p" ]] || die2 "SHOW_ROOT must be /incoming/tv/<Show Name> (show root only). Got: $p"
+    [[ "$p" =~ ^/incoming/tv/[^/]+$ ]] || die2 "SHOW_ROOT must be /incoming/tv/<Show Name> (show root only). Got: $p"
+
+    TARGET_MODE="dir"
+    TARGET_PATH="$p"
+    return 0
+  fi
+
+  if [[ "$p" == /incoming/movies* ]]; then
+    KIND="movies"
+    IN_BASE="/incoming/movies"
+    STAGE_BASE="/staging/movies"
+  elif [[ "$p" == /incoming/clips* ]]; then
+    KIND="clips"
+    IN_BASE="/incoming/clips"
+    STAGE_BASE="/staging/clips"
+  else
+    die2 "Target must live under /incoming/tv, /incoming/movies, or /incoming/clips. Got: $p"
+  fi
+
+  if [[ -d "$p" ]]; then
+    TARGET_MODE="dir"
+    TARGET_PATH="$p"
+  elif is_video_file "$p"; then
+    TARGET_MODE="file"
+    TARGET_PATH="$p"
+  else
+    die2 "Target must be a directory or a video file (.mkv/.mp4/.m4v). Got: $p"
+  fi
+}
+
+# Parse args
+if [[ $# -lt 1 ]]; then usage; fi
+TARGET="$1"; shift
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run-id) RUN_ID="${2:-}"; shift 2 ;;
+    --quality) QUALITY="${2:-}"; shift 2 ;;
+    --preset) PRESET="${2:-}"; shift 2 ;;
+    --max-depth) MAX_DEPTH="${2:-}"; shift 2 ;;
+    --dry-run) DRY_RUN="1"; shift ;;
+    --force) FORCE="1"; shift ;;
+    -h|--help) usage ;;
+    *) echo "Unknown arg: $1"; usage ;;
+  esac
+done
+
+resolve_incoming_target "$TARGET"
+
+# Keep v1 variable names for TV to reduce “diff surface”
+SHOW_ROOT=""
+SHOW_NAME=""
+OUT_ROOT=""
+
+if [[ "$KIND" == "tv" ]]; then
+  SHOW_ROOT="$TARGET_PATH"
+  SHOW_NAME="$(basename "$SHOW_ROOT")"
+  OUT_ROOT="/staging/tv/$SHOW_NAME"
+  TARGET_LABEL="Show"
+  LABEL_VALUE="$SHOW_NAME"
+else
+  OUT_ROOT="$STAGE_BASE"
+  TARGET_LABEL="Kind"
+  LABEL_VALUE="$KIND"
+fi
+
+RUN_ID="${RUN_ID:-$(run_id_now)}"
+
+mkdir -p "$OUT_ROOT"
+
+LOGFILE="/logs/${LABEL_VALUE}-media-tools-${RUN_ID}.log"
+
+START_TS="$(timestamp_now)"
+if [[ "$KIND" == "tv" ]]; then
+  MSG="$(printf "Show: %s | run_id=%s" "$SHOW_NAME" "$RUN_ID")"
+else
+  MSG="$(printf "Kind: %s | run_id=%s\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
+fi
+command -v notify_discord >/dev/null 2>&1 && \
+  notify_discord "🎥 Step 1 of 3: HandBrake started" "$MSG" || true
+
+log_line "$LOGFILE" "${START_TS}  handbrake_mp4 START"
+log_line "$LOGFILE" "  run_id=${RUN_ID}"
+log_line "$LOGFILE" "  input=${TARGET_PATH}"
+log_line "$LOGFILE" "  kind=${KIND}"
+log_line "$LOGFILE" "  settings: quality=${QUALITY} preset=${PRESET} max_depth=${MAX_DEPTH} dry_run=${DRY_RUN} force=${FORCE}"
+log_line "$LOGFILE" "  files:"
+
+# Find candidate files
+FILES=()
+
+if [[ "$TARGET_MODE" == "file" ]]; then
+  FILES=("$TARGET_PATH")
+else
+  mapfile -d '' FILES < <(
+    find "$TARGET_PATH" -mindepth 1 -maxdepth "$MAX_DEPTH" -type f \
+    \( -iname "*.mkv" -o -iname "*.mp4" -o -iname "*.m4v" \) \
+    ! -iname "._*" ! -iname ".DS_Store" ! -path "*/._*" \
+    -print0 | sort -z
+  )
+fi
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  log_line "$LOGFILE" "    (none found)"
+  log_line "$LOGFILE" "handbrake_mp4 END status=OK"
+  if [[ "$KIND" == "tv" ]]; then
+    MSG="$(printf "Show: %s | run_id=%s\nNo source video files found, nothing to do." "$SHOW_NAME" "$RUN_ID")"
+  else
+    MSG="$(printf "Kind: %s | run_id=%s\nNo source video files found, nothing to do.\nTarget: %s" "$KIND" "$RUN_ID" "$TARGET_PATH")"
+  fi
+  command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "⚠️ Step 1 of 3: HandBrake finished" "$MSG" "$LOGFILE" || true
+  exit 0
+fi
+
+FAILS=0
+CREATED=0
+SKIPPED=0
+COUNT=${#FILES[@]}
+CURR=0
+
+for in_file in "${FILES[@]}"; do
+  # Increment current counter
+  CURR=$((CURR + 1))
+
+  # Compute relative path
+  if [[ "$KIND" == "tv" ]]; then
+    rel="${in_file#$SHOW_ROOT/}"
+  else
+    rel="${in_file#$IN_BASE/}"
+    rel="${rel#/}"
+  fi
+
+  rel_dir="$(dirname "$rel")"
+  base="$(basename "$in_file")"
+  stem="${base%.*}"
+
+  if [[ "$rel_dir" == "." ]]; then
+    out_dir="$OUT_ROOT"
+  else
+    out_dir="$OUT_ROOT/$rel_dir"
+  fi
+  out_file="$out_dir/${stem}.norm.mp4"
+  tmp_file="${out_file}.tmp"   # unchanged from v1
+
+  log_line "$LOGFILE" "    $rel"
+
+  if [[ -f "$out_file" && "$FORCE" == "0" ]]; then
+    log_line "$LOGFILE" "    SKIP (exists): $rel -> $out_file"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log_line "$LOGFILE" "    DRYRUN: $rel -> $out_file"
+    continue
+  fi
+
+  mkdir -p "$out_dir"
+
+  # HandBrake forced subtitle burn behavior:
+  # --subtitle scan --subtitle-forced --subtitle-burned
+  # If no forced subtitles are detected, HandBrake should effectively not burn any.
+  if HandBrakeCLI \
+      -i "$in_file" \
+      -o "$tmp_file" \
+      --format av_mp4 \
+      -e x264 \
+      -q "$QUALITY" \
+      --encoder-preset "$PRESET" \
+      --optimize \
+      --audio 1 \
+      --aencoder av_aac \
+      --mixdown auto \
+      --ab 320 \
+      --arate 48 \
+      --subtitle scan \
+      --subtitle-forced \
+      --subtitle-burned; then
+
+    mv -f "$tmp_file" "$out_file"
+    log_line "$LOGFILE" "    CREATED $CURR of $COUNT: $rel -> $out_file"
+
+    if [[ "$KIND" == "tv" ]]; then
+      MSG="$(printf "Show: %s | run_id: %s\nCreated: %s\nOriginal: %s" "$SHOW_NAME" "$RUN_ID" "$out_file" "$rel")"
+    else
+      MSG="$(printf "Kind: %s | run_id: %s\nCreated: %s\nOriginal: %s" "$KIND" "$RUN_ID" "$out_file" "$rel")"
+    fi
+
+    command -v notify_discord >/dev/null 2>&1 && \
+      notify_discord "☑️ HandBrake: Created output mp4 ($CURR of $COUNT)" "$MSG" || true
+    CREATED=$((CREATED + 1))
+  else
+    rm -f "$tmp_file" || true
+    log_line "$LOGFILE" "    FAILED:  $rel"
+
+    if [[ "$KIND" == "tv" ]]; then
+      MSG="$(printf "Show: %s | run_id=%s\nFailed file: %s" "$SHOW_NAME" "$RUN_ID" "$rel")"
+    else
+      MSG="$(printf "Kind: %s | run_id=%s\nFailed file: %s" "$KIND" "$RUN_ID" "$rel")"
+    fi
+
+    command -v notify_discord >/dev/null 2>&1 && \
+      notify_discord "❌ HandBrake: Failed to process file ($CURR of $COUNT)" "$MSG" "$LOGFILE" || true
+    FAILS=$((FAILS + 1))
+  fi
+done
+
+END_TS="$(timestamp_now)"
+STATUS="OK"
+if [[ "$FAILS" -gt 0 ]]; then STATUS="PARTIAL"; fi
+log_line "$LOGFILE" "${END_TS}  handbrake_mp4 END status=${STATUS} created=${CREATED} skipped=${SKIPPED} failed=${FAILS}"
+
+if [[ "$KIND" == "tv" ]]; then
+  MSG="$(printf "Show: %s | run_id=%s | created=%s skipped=%s failed=%s" "$SHOW_NAME" "$RUN_ID" "$CREATED" "$SKIPPED" "$FAILS")"
+else
+  MSG="$(printf "Kind: %s | run_id=%s | created=%s skipped=%s failed=%s" "$KIND" "$RUN_ID" "$CREATED" "$SKIPPED" "$FAILS")"
+fi
+command -v notify_discord >/dev/null 2>&1 && \
+    notify_discord "✅ Step 1 of 3: HandBrake finished" "$MSG" "$LOGFILE" || true
+
+if [[ "$FAILS" -gt 0 ]]; then
+  exit 3
+fi
+
+exit 0

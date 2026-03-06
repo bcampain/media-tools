@@ -1,0 +1,16 @@
+services:
+  media-tools:
+    build: .
+    image: media-tools:0.1
+    container_name: media-tools
+    environment:
+      - TZ=America/Chicago
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+    user: "${PUID}:${PGID}"
+    volumes:
+      - /srv/media/incoming:/incoming
+      - /srv/media/staging:/staging
+      - /srv/media/library:/library
+      - /srv/media/logs:/logs
+    working_dir: /work
+    tty: true
