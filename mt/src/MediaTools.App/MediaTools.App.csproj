@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\MediaTools.Domain\MediaTools.Domain.csproj" />
+    <ProjectReference Include="..\MediaTools.Infrastructure\MediaTools.Infrastructure.csproj" />
+    <ProjectReference Include="..\MediaTools.Scripts\MediaTools.Scripts.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

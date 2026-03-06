@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "lDnqWd72Itw=",
+  "success": true,
+  "projectFilePath": "/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Cli/MediaTools.Cli.csproj",
+  "expectedPackageFiles": [
+    "/Users/rugger.dog/.nuget/packages/microsoft.extensions.dependencyinjection/9.0.0/microsoft.extensions.dependencyinjection.9.0.0.nupkg.sha512",
+    "/Users/rugger.dog/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/9.0.0/microsoft.extensions.dependencyinjection.abstractions.9.0.0.nupkg.sha512",
+    "/Users/rugger.dog/.nuget/packages/system.commandline/2.0.0-beta4.22272.1/system.commandline.2.0.0-beta4.22272.1.nupkg.sha512"
+  ],
+  "logs": []
+}

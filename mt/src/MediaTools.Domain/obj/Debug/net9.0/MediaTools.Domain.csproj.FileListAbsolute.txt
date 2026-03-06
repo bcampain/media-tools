@@ -1,0 +1,12 @@
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/bin/Debug/net9.0/MediaTools.Domain.deps.json
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/bin/Debug/net9.0/MediaTools.Domain.dll
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/bin/Debug/net9.0/MediaTools.Domain.pdb
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.GeneratedMSBuildEditorConfig.editorconfig
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.AssemblyInfoInputs.cache
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.AssemblyInfo.cs
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.csproj.CoreCompileInputs.cache
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.sourcelink.json
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.dll
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/refint/MediaTools.Domain.dll
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/MediaTools.Domain.pdb
+/Users/rugger.dog/repos/media-tools/mt/src/MediaTools.Domain/obj/Debug/net9.0/ref/MediaTools.Domain.dll
