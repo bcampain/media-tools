@@ -1,11 +1,12 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class PromoteCommandHandler(IPromoteRunner promote, ILogSink log)
+public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier discord, ILogSink log)
 {
     public async Task<int> HandleAsync(PromoteOptions options, CancellationToken ct)
     {
@@ -55,6 +56,15 @@ public class PromoteCommandHandler(IPromoteRunner promote, ILogSink log)
             Overwrite:      options.Overwrite,
             DryRun:         options.DryRun //Expected false due to earlier confirmation
         );
+
+        var title = "🖥️ mt CLI: Invoking `promote` script runner";
+        var message =   $"""
+                        Invoking script runner for **runId {runId}**
+                        Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
+                        Will Execute: 
+                        `promote {scriptArgs}`
+                        """;
+        await discord.NotifyAsync(title, message, null, ct);
         
         return await promote.RunAsync(run, scriptOptions, ct);
     }

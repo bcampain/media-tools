@@ -59,14 +59,12 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
             DryRun:         options.DryRun // Expected false due to earlier confirmation
         );
 
-        var title = "🖥️ mt CLI: Invoking handbrake_mp4 script runner";
+        var title = "🖥️ mt CLI: Invoking `handbrake` script runner";
         var message =   $"""
                         Invoking script runner for **runId {runId}**
-                        Target: {options.Target}
-                        Kind: {validated.Kind}
-                        Mode: {validated.Mode}
+                        Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
                         Will Execute: 
-                        `handbrake {scriptArgs}`
+                        `handbrake_mp4 {scriptArgs}`
                         """;
         await discord.NotifyAsync(title, message, null, ct);
 

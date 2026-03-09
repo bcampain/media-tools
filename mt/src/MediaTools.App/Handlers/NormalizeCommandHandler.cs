@@ -1,11 +1,12 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class NormalizeCommandHandler(INormalizeRunner normalize, ILogSink log)
+public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifier discord, ILogSink log)
 {
     public async Task<int> HandleAsync(NormalizeOptions options, CancellationToken ct)
     {
@@ -59,6 +60,15 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, ILogSink log)
             Force:          options.Force,
             DryRun:         options.DryRun //Expected false due to earlier confirmation
         );
+
+        var title = "🖥️ mt CLI: Invoking `normalize` script runner";
+        var message =   $"""
+                        Invoking script runner for **runId {runId}**
+                        Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
+                        Will Execute: 
+                        `normalize_audio {scriptArgs}`
+                        """;
+        await discord.NotifyAsync(title, message, null, ct);
         
         return await normalize.RunAsync(run, scriptOptions, ct);
     }
