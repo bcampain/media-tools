@@ -11,7 +11,17 @@ using MediaTools.Cli.Commands;
 // ── DI container ─────────────────────────────────────────────────────────────
 var services = new ServiceCollection();
 
-services.AddSingleton<ILogSink, ConsoleLogSink>();
+// Date-only filename means each day naturally gets its own file — no explicit
+// rollover logic needed. Each invocation computes today's date at startup.
+// Format: /logs/media-tools-mt-MMddyyyy.log
+var cliLogPath = Path.Combine(
+    "/logs",
+    $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log");
+try { Directory.CreateDirectory("/logs"); } catch (Exception ex) { Console.Error.WriteLine($"[WARN] Could not create log directory: {ex.Message}"); }
+
+// TeeLogSink composes ConsoleLogSink (console output) with file appending.
+// All handlers and runners share the same singleton — one file per day.
+services.AddSingleton<ILogSink>(new TeeLogSink(new ConsoleLogSink(), cliLogPath));
 
 // Script adapters (stubs for M1; replaced with real runners in M3)
 services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();
@@ -46,7 +56,11 @@ var parser = new CommandLineBuilder(root)
         // The bash scripts always write to /logs/ directly; this covers the
         // pipeline-level summary log that the C# orchestrator may write.
         var logDir = context.ParseResult.GetValueForOption(CommonOptions.LogDir) ?? "/logs";
-        try { Directory.CreateDirectory(logDir); } catch { /* non-fatal */ }
+        try { 
+            Directory.CreateDirectory(logDir); 
+        } catch (Exception ex) {
+            Console.Error.WriteLine($"[WARN] Could not create log directory: {ex.Message}");
+        }
 
         await next(context);
     })
