@@ -25,11 +25,12 @@ public class NormalizeRunner(ILogSink log) : INormalizeRunner
 
         using var process = new Process { StartInfo = psi };
 
-        // Subprocess stdout goes directly to console — raw script output is too
-        // verbose for the structured log file. Stderr goes through ILogSink so
-        // errors are captured in both the console and the log file.
+        // Both streams go directly to the console — CLI tools commonly use stderr
+        // for diagnostic/progress info rather than just errors, so there's no
+        // reliable way to filter "real errors" from the stream. Only the C# handler's
+        // explicit log calls (above/below this block) end up in the log file.
         process.OutputDataReceived += (_, e) => { if (e.Data != null) Console.WriteLine(e.Data); };
-        process.ErrorDataReceived  += (_, e) => { if (e.Data != null) log.Warn(e.Data); };
+        process.ErrorDataReceived  += (_, e) => { if (e.Data != null) Console.Error.WriteLine(e.Data); };
 
         process.Start();
         process.BeginOutputReadLine();
