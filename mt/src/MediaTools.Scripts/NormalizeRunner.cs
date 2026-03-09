@@ -25,8 +25,10 @@ public class NormalizeRunner(ILogSink log) : INormalizeRunner
 
         using var process = new Process { StartInfo = psi };
 
-        // Forward the subprocess output lines to our log sink in real time
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) log.Info(e.Data); };
+        // Subprocess stdout goes directly to console — raw script output is too
+        // verbose for the structured log file. Stderr goes through ILogSink so
+        // errors are captured in both the console and the log file.
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) Console.WriteLine(e.Data); };
         process.ErrorDataReceived  += (_, e) => { if (e.Data != null) log.Warn(e.Data); };
 
         process.Start();
