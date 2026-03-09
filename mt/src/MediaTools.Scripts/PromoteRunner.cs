@@ -8,8 +8,7 @@ namespace MediaTools.Scripts;
 // streams its stdout/stderr to the ILogSink, and returns the exit code.
 public class PromoteRunner(ILogSink log) : IPromoteRunner
 {
-    // Script path inside the Docker container
-    private const string ScriptPath = "/bin/promote";
+    private const string ScriptPath = "/usr/local/bin/promote";
 
     public async Task<int> RunAsync(PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
     {
@@ -19,8 +18,9 @@ public class PromoteRunner(ILogSink log) : IPromoteRunner
         var psi = new ProcessStartInfo(ScriptPath, args)
         {
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+            WorkingDirectory       = "/"
         };
 
         using var process = new Process { StartInfo = psi };

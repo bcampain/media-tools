@@ -10,7 +10,7 @@ namespace MediaTools.Infrastructure.Notifications;
 // HttpClient POST to the Discord webhook URL in a future milestone.
 public class DiscordNotifier(ILogSink log) : IDiscordNotifier
 {
-    private const string ScriptPath = "/bin/notify_discord";
+    private const string ScriptPath = "/usr/local/bin/notify_discord";
 
     public async Task<int> NotifyAsync(string title, string message, string? logPath, CancellationToken ct)
     {
@@ -21,7 +21,8 @@ public class DiscordNotifier(ILogSink log) : IDiscordNotifier
         {
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
-            UseShellExecute        = false
+            UseShellExecute        = false,
+            WorkingDirectory       = "/"
         };
 
         using var process = new Process { StartInfo = psi };

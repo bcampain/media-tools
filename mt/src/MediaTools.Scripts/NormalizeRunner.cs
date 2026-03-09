@@ -8,8 +8,7 @@ namespace MediaTools.Scripts;
 // streams its stdout/stderr to the ILogSink, and returns the exit code.
 public class NormalizeRunner(ILogSink log) : INormalizeRunner
 {
-    // Script path inside the Docker container
-    private const string ScriptPath = "/bin/normalize_audio";
+    private const string ScriptPath = "/usr/local/bin/normalize_audio";
 
     public async Task<int> RunAsync(PipelineRun run, NormalizeScriptOptions options, CancellationToken ct)
     {
@@ -19,8 +18,9 @@ public class NormalizeRunner(ILogSink log) : INormalizeRunner
         var psi = new ProcessStartInfo(ScriptPath, args)
         {
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
+            RedirectStandardError  = true,
+            UseShellExecute        = false,
+            WorkingDirectory       = "/"
         };
 
         using var process = new Process { StartInfo = psi };
