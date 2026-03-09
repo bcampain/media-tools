@@ -1,11 +1,12 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, ILogSink log)
+public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifier discord, ILogSink log)
 {
     public async Task<int> HandleAsync(HandbrakeOptions options, CancellationToken ct)
     {
@@ -57,6 +58,16 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, ILogSink log)
             Force:          options.Force,
             DryRun:         options.DryRun // Expected false due to earlier confirmation
         );
+
+        var title = "🖥️ mt CLI: Invoking handbrake_mp4 script runner";
+        var message =   $"""
+                        Invoking script runner for **runId {runId}**
+                        **Target:**      {options.Target}
+                        **Kind:**        {validated.Kind}
+                        **Mode:**        {validated.Mode}
+                        **Script Args:** {scriptArgs}
+                        """;
+        await discord.NotifyAsync(title, message, null, ct);
 
         return await handbrake.RunAsync(run, scriptOptions, ct);
     }
