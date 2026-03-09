@@ -4,8 +4,8 @@ using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
-using MediaTools.Scripts.Stubs;
 using MediaTools.Cli.Commands;
 
 // ── DI container ─────────────────────────────────────────────────────────────
@@ -14,10 +14,10 @@ var services = new ServiceCollection();
 services.AddSingleton<ILogSink, ConsoleLogSink>();
 
 // Script adapters (stubs for M1; replaced with real runners in M3)
-services.AddSingleton<IHandbrakeRunner, StubHandbrakeRunner>();
-services.AddSingleton<INormalizeRunner, StubNormalizeRunner>();
-services.AddSingleton<IPromoteRunner,   StubPromoteRunner>();
-services.AddSingleton<IDiscordNotifier, StubDiscordNotifier>();
+services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();
+services.AddSingleton<INormalizeRunner, NormalizeRunner>();
+services.AddSingleton<IPromoteRunner,   PromoteRunner>();
+services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
 
 // Handlers
 services.AddSingleton<HandbrakeCommandHandler>();

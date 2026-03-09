@@ -1,12 +1,13 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class PromoteCommandHandler(ILogSink log)
+public class PromoteCommandHandler(IPromoteRunner promote, ILogSink log)
 {
-    public Task<int> HandleAsync(PromoteOptions options, CancellationToken ct)
+    public async Task<int> HandleAsync(PromoteOptions options, CancellationToken ct)
     {
         var runId = options.RunId ?? PipelineRun.GenerateRunId();
 
@@ -14,7 +15,7 @@ public class PromoteCommandHandler(ILogSink log)
         if (!validation.IsSuccess)
         {
             log.Error($"[promote] Validation failed: {validation.Error}");
-            return Task.FromResult(HandlerHelpers.ValidationExitCode);
+            return HandlerHelpers.ValidationExitCode;
         }
 
         var validated = validation.Target!;
@@ -29,17 +30,33 @@ public class PromoteCommandHandler(ILogSink log)
         log.Info($"    promote {scriptArgs}");
 
         if (options.DryRun)
-            return Task.FromResult(0);
+            return 0;
 
         if (!options.Yes && !HandlerHelpers.Confirm())
         {
             log.Info("[promote] Cancelled.");
-            return Task.FromResult(0);
+            return 0;
         }
 
-        // M3: replace this stub with IPromoteRunner.RunAsync()
-        log.Info("[promote] (stub — script execution not yet implemented)");
-        return Task.FromResult(0);
+        var run = new PipelineRun(
+            RunId:          runId,
+            StartedAt:      DateTime.UtcNow,
+            Target:         options.Target,
+            TargetMode:     validated.Mode,
+            Kind:           validated.Kind,
+            StagingRoot:    options.StagingRoot,
+            LibraryRoot:    options.LibraryRoot,
+            IncomingRoot:   options.IncomingRoot,
+            LogDir:         options.LogDir
+        );
+
+        var scriptOptions = new PromoteScriptOptions(
+            RetentionDays:  options.RetentionDays,
+            Overwrite:      options.Overwrite,
+            DryRun:         options.DryRun //Expected false due to earlier confirmation
+        );
+        
+        return await promote.RunAsync(run, scriptOptions, ct);
     }
 
     // internal for unit testability.

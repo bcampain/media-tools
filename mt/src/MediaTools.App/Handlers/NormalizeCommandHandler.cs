@@ -1,12 +1,13 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class NormalizeCommandHandler(ILogSink log)
+public class NormalizeCommandHandler(INormalizeRunner normalize, ILogSink log)
 {
-    public Task<int> HandleAsync(NormalizeOptions options, CancellationToken ct)
+    public async Task<int> HandleAsync(NormalizeOptions options, CancellationToken ct)
     {
         var runId = options.RunId ?? PipelineRun.GenerateRunId();
 
@@ -14,7 +15,7 @@ public class NormalizeCommandHandler(ILogSink log)
         if (!validation.IsSuccess)
         {
             log.Error($"[normalize] Validation failed: {validation.Error}");
-            return Task.FromResult(HandlerHelpers.ValidationExitCode);
+            return HandlerHelpers.ValidationExitCode;
         }
 
         var validated = validation.Target!;
@@ -29,17 +30,37 @@ public class NormalizeCommandHandler(ILogSink log)
         log.Info($"    normalize_audio {scriptArgs}");
 
         if (options.DryRun)
-            return Task.FromResult(0);
+            return 0;
 
         if (!options.Yes && !HandlerHelpers.Confirm())
         {
             log.Info("[normalize] Cancelled.");
-            return Task.FromResult(0);
+            return 0;
         }
 
-        // M3: replace this stub with INormalizeRunner.RunAsync()
-        log.Info("[normalize] (stub — script execution not yet implemented)");
-        return Task.FromResult(0);
+        var run = new PipelineRun(
+            RunId:          runId,
+            StartedAt:      DateTime.UtcNow,
+            Target:         options.Target,
+            TargetMode:     validated.Mode,
+            Kind:           validated.Kind,
+            StagingRoot:    options.StagingRoot,
+            LibraryRoot:    options.LibraryRoot,
+            IncomingRoot:   options.IncomingRoot,
+            LogDir:         options.LogDir
+        );
+
+        var scriptOptions = new NormalizeScriptOptions(
+            TargetI:        options.TargetI,
+            TruePeak:       options.TruePeak,
+            Lra:            options.Lra,
+            StereoTrack:    options.StereoTrack,
+            OnePass:        options.OnePass,
+            Force:          options.Force,
+            DryRun:         options.DryRun //Expected false due to earlier confirmation
+        );
+        
+        return await normalize.RunAsync(run, scriptOptions, ct);
     }
 
     // internal for unit testability.
@@ -52,7 +73,7 @@ public class NormalizeCommandHandler(ILogSink log)
             $"--target-i {options.TargetI}",
             $"--true-peak {options.TruePeak}",
             $"--lra {options.Lra}",
-            $"--stereo-track {options.StereoTrack}",
+            $"--stereo-track {options.StereoTrack}"
         };
         if (options.OnePass) parts.Add("--one-pass");
         if (options.Force)   parts.Add("--force");

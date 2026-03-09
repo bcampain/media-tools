@@ -1,12 +1,13 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Scripts;
 
 namespace MediaTools.App.Handlers;
 
-public class HandbrakeCommandHandler(ILogSink log)
+public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, ILogSink log)
 {
-    public Task<int> HandleAsync(HandbrakeOptions options, CancellationToken ct)
+    public async Task<int> HandleAsync(HandbrakeOptions options, CancellationToken ct)
     {
         var runId = options.RunId ?? PipelineRun.GenerateRunId();
 
@@ -14,7 +15,7 @@ public class HandbrakeCommandHandler(ILogSink log)
         if (!validation.IsSuccess)
         {
             log.Error($"[handbrake] Validation failed: {validation.Error}");
-            return Task.FromResult(HandlerHelpers.ValidationExitCode);
+            return HandlerHelpers.ValidationExitCode;
         }
 
         var validated = validation.Target!;
@@ -29,17 +30,35 @@ public class HandbrakeCommandHandler(ILogSink log)
         log.Info($"    handbrake_mp4 {scriptArgs}");
 
         if (options.DryRun)
-            return Task.FromResult(0);
+            return 0;
 
         if (!options.Yes && !HandlerHelpers.Confirm())
         {
             log.Info("[handbrake] Cancelled.");
-            return Task.FromResult(0);
+            return 0;
         }
 
-        // M3: replace this stub with IHandbrakeRunner.RunAsync()
-        log.Info("[handbrake] (stub — script execution not yet implemented)");
-        return Task.FromResult(0);
+        var run = new PipelineRun(
+            RunId:          runId,
+            StartedAt:      DateTime.UtcNow,
+            Target:         options.Target,
+            TargetMode:     validated.Mode,
+            Kind:           validated.Kind,
+            StagingRoot:    options.StagingRoot,
+            LibraryRoot:    options.LibraryRoot,
+            IncomingRoot:   options.IncomingRoot,
+            LogDir:         options.LogDir
+        );
+
+        var scriptOptions = new HandbrakeScriptOptions(
+            Quality:        options.Quality,
+            Preset:         options.Preset,
+            MaxDepth:       options.MaxDepth,
+            Force:          options.Force,
+            DryRun:         options.DryRun // Expected false due to earlier confirmation
+        );
+
+        return await handbrake.RunAsync(run, scriptOptions, ct);
     }
 
     // Builds the argument string passed to the handbrake_mp4 script.
