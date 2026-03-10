@@ -4,6 +4,7 @@ using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Manifests;
 using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 using MediaTools.Cli.Commands;
@@ -25,6 +26,11 @@ services.AddSingleton<ILogSink>(new TeeLogSink(new ConsoleLogSink(), cliLogPath)
 
 // Singleton HttpClient for DiscordNotifier
 services.AddSingleton<HttpClient>();
+
+// ManifestWriter — writes /logs/runs/{RunId}.json for the mt-dashboard to read.
+// Path resolved at startup so it matches whatever --log-dir the CLI would use.
+var runsDir = Path.Combine("/logs", "runs");
+services.AddSingleton<IManifestWriter>(new ManifestWriter(runsDir));
 
 // Script runners — wired into PipelineCommandHandler (M3) and individual handlers
 services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();

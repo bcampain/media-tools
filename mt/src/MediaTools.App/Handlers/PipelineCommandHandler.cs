@@ -1,6 +1,7 @@
 using MediaTools.Domain.Models;
 using MediaTools.Domain.Validation;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Manifests;
 using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
@@ -11,11 +12,12 @@ namespace MediaTools.App.Handlers;
 // This avoids double Discord notifications and keeps the pipeline's own concerns
 // (step skipping, abort-on-failure, inter-step notifications) in one place.
 public class PipelineCommandHandler(
-    IHandbrakeRunner handbrake,
-    INormalizeRunner normalize,
-    IPromoteRunner   promote,
-    IDiscordNotifier discord,
-    ILogSink         log)
+    IHandbrakeRunner  handbrake,
+    INormalizeRunner  normalize,
+    IPromoteRunner    promote,
+    IDiscordNotifier  discord,
+    ILogSink          log,
+    IManifestWriter   manifests)
 {
     // Default script options used by the pipeline. For custom quality / encoding
     // settings, run the individual commands (e.g. `mt handbrake`) directly.
@@ -92,19 +94,55 @@ public class PipelineCommandHandler(
             IncomingRoot: options.IncomingRoot,
             LogDir:       options.LogDir);
 
+        // ── Build & persist the initial manifest ─────────────────────────────
+        // Written before any step runs so mt-dashboard shows the run as "running"
+        // immediately. Each step updates the manifest in-place so the dashboard
+        // can track fine-grained progress by polling /logs/runs/{RunId}.json.
+        var stepsPlanned = new List<string>();
+        if (ShouldRun(PipelineStep.Handbrake))      stepsPlanned.Add("handbrake");
+        if (ShouldRun(PipelineStep.NormalizeAudio)) stepsPlanned.Add("normalize");
+        if (ShouldRun(PipelineStep.Promote))        stepsPlanned.Add("promote");
+
+        var manifest = new PipelineRunManifest
+        {
+            RunId         = runId,
+            StartedAt     = run.StartedAt,
+            Kind          = validated.Kind.ToString().ToLowerInvariant(),
+            TargetMode    = validated.Mode.ToString().ToLowerInvariant(),
+            Target        = options.Target,
+            StagingTarget = stagingTarget,
+            LogFile       = run.LogFilePath(options.Target),
+            Status        = "running",
+            DryRun        = false,
+            StepsPlanned  = stepsPlanned,
+            Steps         = stepsPlanned
+                                .Select(s => new StepRecord { Name = s, Status = "pending" })
+                                .ToList()
+        };
+        manifests.Write(manifest);
+
         // ── Step 1: Handbrake ────────────────────────────────────────────────
         if (ShouldRun(PipelineStep.Handbrake))
         {
             log.Info("[pipeline] [1/3] Starting handbrake...");
+            manifest = manifest.WithStep("handbrake", s => s.AsStarted(DateTime.UtcNow));
+            manifests.Write(manifest);
+
             if (options.Notify)
                 await discord.NotifyAsync(
                     "🖥️ mt pipeline: Step 1/3 — handbrake",
                     $"RunId {runId}\nTarget: {options.Target}", null, ct);
 
             var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts, ct);
+            manifest = manifest.WithStep("handbrake", s => s.AsCompleted(DateTime.UtcNow, rc));
+            manifests.Write(manifest);
+
             if (rc != 0)
             {
                 log.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
+                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifests.Write(manifest);
+
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at handbrake",
@@ -119,15 +157,24 @@ public class PipelineCommandHandler(
         if (ShouldRun(PipelineStep.NormalizeAudio))
         {
             log.Info("[pipeline] [2/3] Starting normalize...");
+            manifest = manifest.WithStep("normalize", s => s.AsStarted(DateTime.UtcNow));
+            manifests.Write(manifest);
+
             if (options.Notify)
                 await discord.NotifyAsync(
                     "🖥️ mt pipeline: Step 2/3 — normalize",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
             var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts, ct);
+            manifest = manifest.WithStep("normalize", s => s.AsCompleted(DateTime.UtcNow, rc));
+            manifests.Write(manifest);
+
             if (rc != 0)
             {
                 log.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
+                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifests.Write(manifest);
+
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at normalize",
@@ -142,15 +189,24 @@ public class PipelineCommandHandler(
         if (ShouldRun(PipelineStep.Promote))
         {
             log.Info("[pipeline] [3/3] Starting promote...");
+            manifest = manifest.WithStep("promote", s => s.AsStarted(DateTime.UtcNow));
+            manifests.Write(manifest);
+
             if (options.Notify)
                 await discord.NotifyAsync(
                     "🖥️ mt pipeline: Step 3/3 — promote",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
             var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, ct);
+            manifest = manifest.WithStep("promote", s => s.AsCompleted(DateTime.UtcNow, rc));
+            manifests.Write(manifest);
+
             if (rc != 0)
             {
                 log.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
+                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifests.Write(manifest);
+
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at promote",
@@ -162,6 +218,9 @@ public class PipelineCommandHandler(
         }
 
         log.Info("[pipeline] All steps completed.");
+        manifest = manifest.WithStatus("complete", 0, DateTime.UtcNow);
+        manifests.Write(manifest);
+
         if (options.Notify)
             await discord.NotifyAsync(
                 "✅ mt pipeline: Complete",
