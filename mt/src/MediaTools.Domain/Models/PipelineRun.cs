@@ -7,7 +7,6 @@ namespace MediaTools.Domain.Models;
 public record PipelineRun(
     string      RunId,
     DateTime    StartedAt,
-    string      Target,
     TargetMode  TargetMode,
     Kind        Kind,
     string      StagingRoot,
@@ -27,12 +26,14 @@ public record PipelineRun(
     /// Derives the expected log file path for this run, matching bash script naming:
     /// TV:           /logs/&lt;ShowName&gt;-media-tools-&lt;RunId&gt;.log
     /// Movies/Clips: /logs/&lt;kind&gt;-media-tools-&lt;RunId&gt;.log
+    /// The target is passed explicitly rather than stored on the run because the
+    /// three pipeline steps operate on different paths (incoming vs. staging).
     /// </summary>
-    public string LogFilePath()
+    public string LogFilePath(string target)
     {
         var label = Kind switch
         {
-            Kind.Tv     => Path.GetFileName(Target.TrimEnd('/')),
+            Kind.Tv     => Path.GetFileName(target.TrimEnd('/')),
             Kind.Movies => "movies",
             Kind.Clips  => "clips",
             _           => "unknown"

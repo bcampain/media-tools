@@ -10,9 +10,9 @@ public class HandbrakeRunner(ILogSink log) : IHandbrakeRunner
 {
     private const string ScriptPath = "/usr/local/bin/handbrake_mp4";
 
-    public async Task<int> RunAsync(PipelineRun run, HandbrakeScriptOptions options, CancellationToken ct)
+    public async Task<int> RunAsync(string target, PipelineRun run, HandbrakeScriptOptions options, CancellationToken ct)
     {
-        var args = BuildArgs(run, options);
+        var args = BuildArgs(target, run, options);
         log.Info($"[handbrake] Invoking: {ScriptPath} {args}");
 
         var psi = new ProcessStartInfo(ScriptPath, args)
@@ -54,11 +54,11 @@ public class HandbrakeRunner(ILogSink log) : IHandbrakeRunner
         return process.ExitCode;
     }
 
-    private static string BuildArgs(PipelineRun run, HandbrakeScriptOptions options)
+    private static string BuildArgs(string target, PipelineRun run, HandbrakeScriptOptions options)
     {
         var parts = new List<string>
         {
-            $"\"{run.Target}\"",
+            $"\"{target}\"",
             $"--run-id {run.RunId}",
             $"--quality {options.Quality}",
             $"--preset {options.Preset}",

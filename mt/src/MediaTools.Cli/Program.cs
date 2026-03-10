@@ -23,7 +23,7 @@ try { Directory.CreateDirectory("/logs"); } catch (Exception ex) { Console.Error
 // All handlers and runners share the same singleton — one file per day.
 services.AddSingleton<ILogSink>(new TeeLogSink(new ConsoleLogSink(), cliLogPath));
 
-// Script adapters (stubs for M1; replaced with real runners in M3)
+// Script runners — wired into PipelineCommandHandler (M3) and individual handlers
 services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();
 services.AddSingleton<INormalizeRunner, NormalizeRunner>();
 services.AddSingleton<IPromoteRunner,   PromoteRunner>();

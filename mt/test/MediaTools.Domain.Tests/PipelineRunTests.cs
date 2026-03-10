@@ -20,7 +20,6 @@ public class PipelineRunTests
         var run = new PipelineRun(
             RunId:        "030526143000",
             StartedAt:    DateTime.UtcNow,
-            Target:       "/incoming/tv/My Show",
             TargetMode:   TargetMode.Dir,
             Kind:         Kind.Tv,
             StagingRoot:  "/staging",
@@ -29,7 +28,7 @@ public class PipelineRunTests
             LogDir:       "/logs"
         );
 
-        run.LogFilePath().Should().Be("/logs/My Show-media-tools-030526143000.log");
+        run.LogFilePath("/incoming/tv/My Show").Should().Be("/logs/My Show-media-tools-030526143000.log");
     }
 
     [Fact]
@@ -38,7 +37,6 @@ public class PipelineRunTests
         var run = new PipelineRun(
             RunId:        "030526143000",
             StartedAt:    DateTime.UtcNow,
-            Target:       "/incoming/movies/Alien.mp4",
             TargetMode:   TargetMode.File,
             Kind:         Kind.Movies,
             StagingRoot:  "/staging",
@@ -47,7 +45,7 @@ public class PipelineRunTests
             LogDir:       "/logs"
         );
 
-        run.LogFilePath().Should().Be("/logs/movies-media-tools-030526143000.log");
+        run.LogFilePath("/incoming/movies/Alien.mp4").Should().Be("/logs/movies-media-tools-030526143000.log");
     }
 
     [Fact]
@@ -56,7 +54,6 @@ public class PipelineRunTests
         var run = new PipelineRun(
             RunId:        "030526143000",
             StartedAt:    DateTime.UtcNow,
-            Target:       "/incoming/clips/",
             TargetMode:   TargetMode.Dir,
             Kind:         Kind.Clips,
             StagingRoot:  "/staging",
@@ -65,6 +62,6 @@ public class PipelineRunTests
             LogDir:       "/logs"
         );
 
-        run.LogFilePath().Should().Be("/logs/clips-media-tools-030526143000.log");
+        run.LogFilePath("/incoming/clips/").Should().Be("/logs/clips-media-tools-030526143000.log");
     }
 }

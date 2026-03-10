@@ -10,9 +10,9 @@ public class NormalizeRunner(ILogSink log) : INormalizeRunner
 {
     private const string ScriptPath = "/usr/local/bin/normalize_audio";
 
-    public async Task<int> RunAsync(PipelineRun run, NormalizeScriptOptions options, CancellationToken ct)
+    public async Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options, CancellationToken ct)
     {
-        var args = BuildArgs(run, options);
+        var args = BuildArgs(target, run, options);
         log.Info($"[normalize] Invoking: {ScriptPath} {args}");
 
         var psi = new ProcessStartInfo(ScriptPath, args)
@@ -54,11 +54,11 @@ public class NormalizeRunner(ILogSink log) : INormalizeRunner
         return process.ExitCode;
     }
 
-    private static string BuildArgs(PipelineRun run, NormalizeScriptOptions options)
+    private static string BuildArgs(string target, PipelineRun run, NormalizeScriptOptions options)
     {
         var parts = new List<string>
         {
-            $"\"{run.Target}\"",
+            $"\"{target}\"",
             $"--run-id {run.RunId}",
             $"--target-i {options.TargetI}",
             $"--true-peak {options.TruePeak}",

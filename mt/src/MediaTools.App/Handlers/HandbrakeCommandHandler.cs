@@ -42,7 +42,6 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
         var run = new PipelineRun(
             RunId:          runId,
             StartedAt:      DateTime.UtcNow,
-            Target:         options.Target,
             TargetMode:     validated.Mode,
             Kind:           validated.Kind,
             StagingRoot:    options.StagingRoot,
@@ -63,12 +62,12 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
         var message =   $"""
                         Invoking script runner for **runId {runId}**
                         Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
-                        Will Execute: 
+                        Will Execute:
                         `handbrake_mp4 {scriptArgs}`
                         """;
         await discord.NotifyAsync(title, message, null, ct);
 
-        return await handbrake.RunAsync(run, scriptOptions, ct);
+        return await handbrake.RunAsync(options.Target, run, scriptOptions, ct);
     }
 
     // Builds the argument string passed to the handbrake_mp4 script.

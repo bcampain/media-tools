@@ -10,9 +10,9 @@ public class PromoteRunner(ILogSink log) : IPromoteRunner
 {
     private const string ScriptPath = "/usr/local/bin/promote";
 
-    public async Task<int> RunAsync(PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
+    public async Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
     {
-        var args = BuildArgs(run, options);
+        var args = BuildArgs(target, run, options);
         log.Info($"[promote] Invoking: {ScriptPath} {args}");
 
         var psi = new ProcessStartInfo(ScriptPath, args)
@@ -54,11 +54,11 @@ public class PromoteRunner(ILogSink log) : IPromoteRunner
         return process.ExitCode;
     }
 
-    private static string BuildArgs(PipelineRun run, PromoteScriptOptions options)
+    private static string BuildArgs(string target, PipelineRun run, PromoteScriptOptions options)
     {
         var parts = new List<string>
         {
-            $"\"{run.Target}\"",
+            $"\"{target}\"",
             $"--run-id {run.RunId}",
             $"--retention-days {options.RetentionDays}"
         };

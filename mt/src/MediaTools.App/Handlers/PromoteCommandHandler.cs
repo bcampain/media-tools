@@ -42,7 +42,6 @@ public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier disc
         var run = new PipelineRun(
             RunId:          runId,
             StartedAt:      DateTime.UtcNow,
-            Target:         options.Target,
             TargetMode:     validated.Mode,
             Kind:           validated.Kind,
             StagingRoot:    options.StagingRoot,
@@ -61,12 +60,12 @@ public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier disc
         var message =   $"""
                         Invoking script runner for **runId {runId}**
                         Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
-                        Will Execute: 
+                        Will Execute:
                         `promote {scriptArgs}`
                         """;
         await discord.NotifyAsync(title, message, null, ct);
-        
-        return await promote.RunAsync(run, scriptOptions, ct);
+
+        return await promote.RunAsync(options.Target, run, scriptOptions, ct);
     }
 
     // internal for unit testability.

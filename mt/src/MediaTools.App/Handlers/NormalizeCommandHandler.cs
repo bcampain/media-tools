@@ -42,7 +42,6 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
         var run = new PipelineRun(
             RunId:          runId,
             StartedAt:      DateTime.UtcNow,
-            Target:         options.Target,
             TargetMode:     validated.Mode,
             Kind:           validated.Kind,
             StagingRoot:    options.StagingRoot,
@@ -65,12 +64,12 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
         var message =   $"""
                         Invoking script runner for **runId {runId}**
                         Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
-                        Will Execute: 
+                        Will Execute:
                         `normalize_audio {scriptArgs}`
                         """;
         await discord.NotifyAsync(title, message, null, ct);
-        
-        return await normalize.RunAsync(run, scriptOptions, ct);
+
+        return await normalize.RunAsync(options.Target, run, scriptOptions, ct);
     }
 
     // internal for unit testability.
