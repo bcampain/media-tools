@@ -111,7 +111,7 @@ public class PipelineCommandHandler(
             TargetMode    = validated.Mode.ToString().ToLowerInvariant(),
             Target        = options.Target,
             StagingTarget = stagingTarget,
-            LogFile       = run.LogFilePath(options.Target),
+            LogFile       = Path.Combine(options.LogDir, $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log"),
             Status        = RunStatus.Running,
             DryRun        = false,
             StepsPlanned  = stepsPlanned,

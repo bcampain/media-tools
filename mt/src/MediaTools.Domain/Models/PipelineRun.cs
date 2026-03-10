@@ -21,23 +21,4 @@ public record PipelineRun(
     /// </summary>
     public static string GenerateRunId() =>
         DateTime.Now.ToString("MMddyyHHmmss");
-
-    /// <summary>
-    /// Derives the expected log file path for this run, matching bash script naming:
-    /// TV:           /logs/&lt;ShowName&gt;-media-tools-&lt;RunId&gt;.log
-    /// Movies/Clips: /logs/&lt;kind&gt;-media-tools-&lt;RunId&gt;.log
-    /// The target is passed explicitly rather than stored on the run because the
-    /// three pipeline steps operate on different paths (incoming vs. staging).
-    /// </summary>
-    public string LogFilePath(string target)
-    {
-        var label = Kind switch
-        {
-            Kind.Tv     => Path.GetFileName(target.TrimEnd('/')),
-            Kind.Movies => "movies",
-            Kind.Clips  => "clips",
-            _           => "unknown"
-        };
-        return Path.Combine(LogDir, $"{label}-media-tools-{RunId}.log");
-    }
 }
