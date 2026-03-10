@@ -75,6 +75,7 @@ public class PipelineCommandHandler(
         if (options.DryRun)
             return 0;
 
+        log.Info("[pipeline] Awaiting confirmation...");
         if (!options.Yes && !HandlerHelpers.Confirm())
         {
             log.Info("[pipeline] Cancelled.");
