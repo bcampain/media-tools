@@ -10,13 +10,10 @@ public class NotifyDiscordCommandHandler(IDiscordNotifier discord, ILogSink log)
     {
         var runId = options.RunId ?? PipelineRun.GenerateRunId();
 
-        log.Info($"[notify-discord] run_id={runId}");
+        log.Info($"[discord-notify] run_id={runId}");
         log.Info($"  Title:   {options.Title}");
         log.Info($"  Message: {options.Message}");
         if (options.Log != null) log.Info($"  Log:     {options.Log}");
-        log.Info("");
-        log.Info("  Would invoke:");
-        log.Info($"    notify_discord \"{options.Title}\" \"{options.Message}\"{(options.Log != null ? $" \"{options.Log}\"" : "")}");
 
         if (options.DryRun)
             return 0;

@@ -23,11 +23,16 @@ try { Directory.CreateDirectory("/logs"); } catch (Exception ex) { Console.Error
 // All handlers and runners share the same singleton — one file per day.
 services.AddSingleton<ILogSink>(new TeeLogSink(new ConsoleLogSink(), cliLogPath));
 
+// Singleton HttpClient for DiscordNotifier
+services.AddSingleton<HttpClient>();
+
 // Script runners — wired into PipelineCommandHandler (M3) and individual handlers
 services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();
 services.AddSingleton<INormalizeRunner, NormalizeRunner>();
 services.AddSingleton<IPromoteRunner,   PromoteRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL")))
+    Console.Error.WriteLine("[WARN] DISCORD_WEBHOOK_URL is not set — Discord notifications are disabled");
 
 // Handlers
 services.AddSingleton<HandbrakeCommandHandler>();
