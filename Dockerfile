@@ -1,7 +1,7 @@
 # /srv/media-tools/Dockerfile
 
 # ── Stage 1: build the mt CLI ─────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY mt/ .
 RUN dotnet publish src/MediaTools.Cli/MediaTools.Cli.csproj \
