@@ -1,0 +1,4 @@
+mt/**/bin/
+mt/**/obj/
+.git/
+.env
