@@ -2,6 +2,8 @@ using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
+using MediaTools.App.FileSystem;
+using MediaTools.App.Handbrake;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
 using MediaTools.Infrastructure.Manifests;
@@ -32,8 +34,16 @@ services.AddSingleton<HttpClient>();
 var runsDir = Path.Combine("/logs", "runs");
 services.AddSingleton<IManifestWriter>(new ManifestWriter(runsDir));
 
-// Script runners — wired into PipelineCommandHandler (M3) and individual handlers
-services.AddSingleton<IHandbrakeRunner, HandbrakeRunner>();
+// Shared file-system utilities used by native step runners.
+// VideoFileScanner is stateless; a singleton is safe and avoids allocation overhead.
+services.AddSingleton<VideoFileScanner>();
+
+// NativeHandbrakeRunner replaces the old HandbrakeRunner script caller.
+// It uses HandBrakeCLI directly and reports per-file progress to the manifest
+// so the mt-dashboard can render a live progress bar.
+services.AddSingleton<IHandbrakeRunner, NativeHandbrakeRunner>();
+
+// Normalize and promote still delegate to their shell scripts.
 services.AddSingleton<INormalizeRunner, NormalizeRunner>();
 services.AddSingleton<IPromoteRunner,   PromoteRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();

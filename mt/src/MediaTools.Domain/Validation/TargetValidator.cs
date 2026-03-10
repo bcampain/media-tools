@@ -16,7 +16,8 @@ namespace MediaTools.Domain.Validation;
 public static class TargetValidator
 {
     // HashSet for O(1) membership checks instead of O(n) array searches.
-    private static readonly HashSet<string> VideoExtensions = [".mkv", ".mp4", ".m4v"];
+    // Public so VideoFileScanner can reference the same set and stay in sync.
+    public static readonly HashSet<string> VideoExtensions = [".mkv", ".mp4", ".m4v", ".avi", ".mov"];
     private static readonly HashSet<string> ValidKindSegments = ["tv", "movies", "clips"];
 
     /// <summary>

@@ -68,7 +68,7 @@ public class PipelineCommandHandler(
         log.Info("");
         log.Info("  Plan:");
         if (ShouldRun(PipelineStep.Handbrake))
-            log.Info($"    [1/3] handbrake_mp4 {HandlerHelpers.Q(options.Target)} --run-id {runId}");
+            log.Info($"    [1/3] HandBrakeCLI (native) · target: {HandlerHelpers.Q(options.Target)} · run-id: {runId}");
         if (ShouldRun(PipelineStep.NormalizeAudio))
             log.Info($"    [2/3] normalize_audio {HandlerHelpers.Q(stagingTarget)} --run-id {runId}");
         if (ShouldRun(PipelineStep.Promote))
@@ -112,11 +112,11 @@ public class PipelineCommandHandler(
             Target        = options.Target,
             StagingTarget = stagingTarget,
             LogFile       = run.LogFilePath(options.Target),
-            Status        = "running",
+            Status        = RunStatus.Running,
             DryRun        = false,
             StepsPlanned  = stepsPlanned,
             Steps         = stepsPlanned
-                                .Select(s => new StepRecord { Name = s, Status = "pending" })
+                                .Select(s => new StepRecord { Name = s, Status = StepStatus.Pending })
                                 .ToList()
         };
         manifests.Write(manifest);
@@ -133,14 +133,31 @@ public class PipelineCommandHandler(
                     "🖥️ mt pipeline: Step 1/3 — handbrake",
                     $"RunId {runId}\nTarget: {options.Target}", null, ct);
 
-            var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts, ct);
+            // Wire up per-file progress reporting: each time a file completes, the
+            // NativeHandbrakeRunner invokes this callback with a fresh StepFileProgress
+            // snapshot. We update the manifest in-place so the mt-dashboard can
+            // render a live progress bar ("7 of 12 files processed") while encoding runs.
+            // The closure captures the manifest ref via a local variable so we can
+            // update it across multiple callback invocations.
+            var handbrakeManifest = manifest;
+            void OnHandbrakeProgress(StepFileProgress fp)
+            {
+                handbrakeManifest = handbrakeManifest.WithStepFileProgress("handbrake", fp);
+                manifests.Write(handbrakeManifest);
+            }
+
+            var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts,
+                onProgress: OnHandbrakeProgress, ct);
+
+            // Sync the outer manifest reference with any progress updates that arrived
+            manifest = handbrakeManifest;
             manifest = manifest.WithStep("handbrake", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 
             if (rc != 0)
             {
                 log.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
                 if (options.Notify)
@@ -172,7 +189,7 @@ public class PipelineCommandHandler(
             if (rc != 0)
             {
                 log.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
                 if (options.Notify)
@@ -204,7 +221,7 @@ public class PipelineCommandHandler(
             if (rc != 0)
             {
                 log.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus("failed", rc, DateTime.UtcNow);
+                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
                 if (options.Notify)
@@ -218,7 +235,7 @@ public class PipelineCommandHandler(
         }
 
         log.Info("[pipeline] All steps completed.");
-        manifest = manifest.WithStatus("complete", 0, DateTime.UtcNow);
+        manifest = manifest.WithStatus(RunStatus.Complete, 0, DateTime.UtcNow);
         manifests.Write(manifest);
 
         if (options.Notify)
