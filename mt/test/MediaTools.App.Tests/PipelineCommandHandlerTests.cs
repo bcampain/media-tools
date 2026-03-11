@@ -2,6 +2,7 @@ using FluentAssertions;
 using MediaTools.App.Handlers;
 using MediaTools.Domain.Models;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Manifests;
 using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
@@ -26,7 +27,9 @@ public class PipelineCommandHandlerTests
 
     private class NullHandbrakeRunner : IHandbrakeRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, HandbrakeScriptOptions options, CancellationToken ct)
+        public Task<int> RunAsync(
+            string target, PipelineRun run, HandbrakeScriptOptions options,
+            Action<StepFileProgress>? onProgress, CancellationToken ct)
             => Task.FromResult(0);
     }
 
@@ -48,6 +51,13 @@ public class PipelineCommandHandlerTests
             => Task.FromResult(0);
     }
 
+    // No-op manifest writer: swallows all writes (pipeline runs in test use --dry-run
+    // and return before reaching any manifest write; this satisfies the constructor).
+    private class NullManifestWriter : IManifestWriter
+    {
+        public void Write(PipelineRunManifest manifest) { }
+    }
+
     // ── Factory helpers ──────────────────────────────────────────────────────
 
     private static PipelineCommandHandler MakeHandler() => new(
@@ -55,7 +65,8 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        new ConsoleLogSink());
+        new ConsoleLogSink(),
+        new NullManifestWriter());
 
     private static PipelineOptions OptionsFor(string target, bool dryRun = true) =>
         new(
