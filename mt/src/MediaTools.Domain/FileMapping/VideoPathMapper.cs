@@ -13,22 +13,28 @@ namespace MediaTools.Domain.FileMapping;
 /// </summary>
 public static class VideoPathMapper
 {
-    private const string Mp4Extension = ".mp4";
+    // The .norm.mp4 suffix is the handoff contract between step 1 (handbrake) and
+    // step 2 (normalize_audio). The normalize script searches for *.norm.mp4 files
+    // and renames them to *.mp4 after processing. Promote then operates on plain *.mp4.
+    private const string NormMp4Extension = ".norm.mp4";
 
     /// <summary>
     /// Maps an incoming video file path to its expected staging output path.
     ///
+    /// The output uses a .norm.mp4 extension so the normalize_audio script can
+    /// distinguish "awaiting normalization" files from already-normalized ones.
+    ///
     /// Example:
-    ///   input:       /incoming/movies/Alien.mkv
+    ///   input:        /incoming/movies/Alien.mkv
     ///   incomingRoot: /incoming
     ///   stagingRoot:  /staging
-    ///   → /staging/movies/Alien.mp4
+    ///   → /staging/movies/Alien.norm.mp4
     ///
     /// Example (TV):
     ///   input:        /incoming/tv/Breaking Bad/Season 1/S01E01.mkv
     ///   incomingRoot: /incoming
     ///   stagingRoot:  /staging
-    ///   → /staging/tv/Breaking Bad/Season 1/S01E01.mp4
+    ///   → /staging/tv/Breaking Bad/Season 1/S01E01.norm.mp4
     /// </summary>
     public static string MapHandbrakeOutput(string inputFile, string incomingRoot, string stagingRoot)
     {
@@ -36,9 +42,10 @@ public static class VideoPathMapper
             incomingRoot.TrimEnd(Path.DirectorySeparatorChar),
             inputFile);
 
-        // Replace the original extension with .mp4
-        var withMp4Ext = Path.ChangeExtension(relative, Mp4Extension);
-        return Path.Combine(stagingRoot.TrimEnd(Path.DirectorySeparatorChar), withMp4Ext);
+        // Path.ChangeExtension replaces from the last dot onward, so
+        // "Movie.mkv" → "Movie.norm.mp4" as intended.
+        var withNormExt = Path.ChangeExtension(relative, NormMp4Extension);
+        return Path.Combine(stagingRoot.TrimEnd(Path.DirectorySeparatorChar), withNormExt);
     }
 
     /// <summary>
