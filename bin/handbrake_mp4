@@ -284,9 +284,15 @@ for in_file in "${FILES[@]}"; do
 
   mkdir -p "$out_dir"
 
-  # HandBrake forced subtitle burn behavior:
-  # --subtitle scan --subtitle-forced --subtitle-burned
-  # If no forced subtitles are detected, HandBrake should effectively not burn any.
+  # Subtitle passthrough behavior:
+  # --all-subtitles selects every subtitle track in the source and passes them
+  # through as selectable (soft) tracks — no forced-only filtering, nothing burned in.
+  #
+  # MP4 container caveat: text-based subtitles (SRT, ASS) are converted to TX3G
+  # and embed fine. Image-based subtitles (PGS from Blu-rays, VOBSUB from DVDs)
+  # cannot be stored as selectable tracks in MP4 and will be silently dropped by
+  # HandBrake. If your sources are Blu-ray rips with PGS subs, consider MKV output
+  # or burning them in instead.
   if HandBrakeCLI \
       -i "$in_file" \
       -o "$tmp_file" \
@@ -300,9 +306,7 @@ for in_file in "${FILES[@]}"; do
       --mixdown auto \
       --ab 320 \
       --arate 48 \
-      --subtitle scan \
-      --subtitle-forced \
-      --subtitle-burned; then
+      --all-subtitles; then
 
     mv -f "$tmp_file" "$out_file"
     log_line "$LOGFILE" "    CREATED $CURR of $COUNT: $rel -> $out_file"

@@ -231,6 +231,16 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
     ///                    "fast" is a good balance for batch processing.
     /// Audio:             Copy supported tracks verbatim; fall back to AAC for others.
     ///                    This preserves Dolby/DTS tracks when the container supports them.
+    /// Subtitles:         --all-subtitles selects every subtitle track from the source and
+    ///                    passes them through as selectable (soft) tracks — no forced-only
+    ///                    filter, nothing burned in. This mirrors the HandBrake GUI behavior
+    ///                    of "Add All Tracks" without checking "Forced Only" or "Burned In".
+    ///
+    ///                    MP4 container caveat: text-based subtitles (SRT, ASS) are converted
+    ///                    to TX3G and embed fine. Image-based subtitles (PGS from Blu-rays,
+    ///                    VOBSUB from DVDs) cannot be stored as selectable tracks in MP4 and
+    ///                    will be silently dropped by HandBrake. If sources are Blu-ray rips
+    ///                    with PGS subs, consider MKV output or burning them in instead.
     /// </summary>
     private static string BuildHandBrakeArgs(
         string inputPath, string outputPath, HandbrakeScriptOptions options)
@@ -247,6 +257,8 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
             "--audio-copy-mask", "aac,ac3,eac3,truehd,dtshd,dts,mp3",
             "--audio-fallback",  "av_aac",
             "--aencoder",        "copy",
+            // Subtitles: pass through all tracks as selectable options (not burned in)
+            "--all-subtitles",
             // Include chapter markers if present in the source
             "--markers"
         };
