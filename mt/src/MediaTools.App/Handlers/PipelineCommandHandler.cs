@@ -121,6 +121,9 @@ public class PipelineCommandHandler(
         };
         manifests.Write(manifest);
 
+        try
+        {
+
         // ── Step 1: Handbrake ────────────────────────────────────────────────
         if (ShouldRun(PipelineStep.Handbrake))
         {
@@ -244,6 +247,30 @@ public class PipelineCommandHandler(
                 $"All steps finished for RunId {runId}", null, ct);
 
         return 0;
+
+        } // end try
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C was pressed. The runner that was active already killed its
+            // child process and re-threw, so we just need to stamp the manifest.
+            log.Warn("[pipeline] Run cancelled by user (Ctrl+C).");
+            var cancelledAt = DateTime.UtcNow;
+            // Mark the step that was mid-run as Cancelled so the dashboard doesn't
+            // show it stuck in "running". Pending steps that hadn't started are untouched.
+            manifest = manifest.WithCancelledRunningSteps(cancelledAt)
+                               .WithStatus(RunStatus.Cancelled, exitCode: 130, cancelledAt);
+            manifests.Write(manifest);
+
+            if (options.Notify)
+                await discord.NotifyAsync(
+                    "⚠️ mt pipeline: Cancelled",
+                    $"Run {runId} was cancelled by the user.", manifest.LogFile,
+                    CancellationToken.None); // ct is already signalled — use None here
+
+            // 130 = 128 + SIGINT(2): the conventional shell exit code for Ctrl+C,
+            // matching what bash scripts return when interrupted the same way.
+            return 130;
+        }
     }
 
     // Maps the --step / --until string values to the PipelineStep enum.

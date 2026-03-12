@@ -29,6 +29,9 @@ public record StepRecord
             ExitCode    = exitCode
         };
 
+    public StepRecord AsCancelled(DateTime at) =>
+        this with { Status = StepStatus.Cancelled, CompletedAt = at };
+
     public StepRecord WithFileProgress(StepFileProgress fp) =>
         this with { FileProgress = fp };
 }
@@ -70,4 +73,16 @@ public record PipelineRunManifest
     /// </summary>
     public PipelineRunManifest WithStepFileProgress(string stepName, StepFileProgress fp) =>
         WithStep(stepName, s => s.WithFileProgress(fp));
+
+    /// <summary>
+    /// Returns a copy where every step still in <see cref="StepStatus.Running"/> is
+    /// transitioned to <see cref="StepStatus.Cancelled"/>. Called from the cancellation
+    /// handler so the dashboard never shows a step stuck in Running after a Ctrl+C.
+    /// Pending steps (not yet reached) are left as-is — only the active step is affected.
+    /// </summary>
+    public PipelineRunManifest WithCancelledRunningSteps(DateTime at) =>
+        this with
+        {
+            Steps = Steps.Select(s => s.Status == StepStatus.Running ? s.AsCancelled(at) : s).ToList()
+        };
 }
