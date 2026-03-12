@@ -120,7 +120,7 @@ public class NativeHandbrakeRunner(
             if (!options.Force && File.Exists(job.OutputPath))
             {
                 log.Info($"[handbrake]   Skipping — output already exists (use --force to re-encode).");
-                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = DateTime.UtcNow, ExitCode = 0 };
+                jobs[i] = jobs[i] with { Status = StepStatus.Skipped, CompletedAt = DateTime.UtcNow, ExitCode = 0 };
                 ReportProgress(onProgress, jobs, currentFile: null);
                 skippedCount++;
                 continue;
@@ -311,10 +311,12 @@ public class NativeHandbrakeRunner(
         // Single pass — avoids iterating the job list twice per progress update.
         var processed = 0;
         var failed    = 0;
+        var skipped   = 0;
         foreach (var j in jobs)
         {
-            if (j.Status is StepStatus.Complete or StepStatus.Failed) processed++;
-            if (j.Status == StepStatus.Failed) failed++;
+            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped) processed++;
+            if (j.Status == StepStatus.Failed)  failed++;
+            if (j.Status == StepStatus.Skipped) skipped++;
         }
 
         onProgress(new StepFileProgress
@@ -322,6 +324,7 @@ public class NativeHandbrakeRunner(
             TotalFiles     = jobs.Count,
             ProcessedFiles = processed,
             FailedFiles    = failed,
+            SkippedFiles   = skipped,
             CurrentFile    = currentFile,
             // Include the full file list so the dashboard can render per-file indicators.
             // For very large sets this could be trimmed, but typical media batches are

@@ -50,5 +50,6 @@ public enum StepStatus
     Running,
     Complete,
     Failed,
-    Cancelled
+    Cancelled,
+    Skipped
 }
