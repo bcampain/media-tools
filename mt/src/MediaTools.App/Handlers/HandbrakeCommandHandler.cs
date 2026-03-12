@@ -49,7 +49,7 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
             StagingRoot:  options.StagingRoot,
             LibraryRoot:  options.LibraryRoot,
             IncomingRoot: options.IncomingRoot,
-            LogDir:       options.LogDir
+            LogFile:      PipelineRun.ComputeLogFile(options.LogDir)
         );
 
         var encodeOptions = new HandbrakeScriptOptions(

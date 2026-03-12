@@ -47,7 +47,7 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
             StagingRoot:    options.StagingRoot,
             LibraryRoot:    options.LibraryRoot,
             IncomingRoot:   options.IncomingRoot,
-            LogDir:         options.LogDir
+            LogFile:        PipelineRun.ComputeLogFile(options.LogDir)
         );
 
         var scriptOptions = new NormalizeScriptOptions(

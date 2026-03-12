@@ -12,7 +12,7 @@ public record PipelineRun(
     string      StagingRoot,
     string      LibraryRoot,
     string      IncomingRoot,
-    string      LogDir
+    string      LogFile
 )
 {
     /// <summary>
@@ -21,4 +21,12 @@ public record PipelineRun(
     /// </summary>
     public static string GenerateRunId() =>
         DateTime.Now.ToString("MMddyyHHmmss");
+
+    /// <summary>
+    /// Single source of truth for the log file path convention used across all
+    /// handlers and runners. Call once per run at construction time to avoid
+    /// any theoretical midnight-rollover skew between callers.
+    /// </summary>
+    public static string ComputeLogFile(string logDir) =>
+        Path.Combine(logDir, $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log");
 }

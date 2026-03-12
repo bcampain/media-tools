@@ -92,7 +92,7 @@ public class PipelineCommandHandler(
             StagingRoot:  options.StagingRoot,
             LibraryRoot:  options.LibraryRoot,
             IncomingRoot: options.IncomingRoot,
-            LogDir:       options.LogDir);
+            LogFile:      PipelineRun.ComputeLogFile(options.LogDir));
 
         // ── Build & persist the initial manifest ─────────────────────────────
         // Written before any step runs so mt-dashboard shows the run as "running"
@@ -111,7 +111,7 @@ public class PipelineCommandHandler(
             TargetMode    = validated.Mode.ToString().ToLowerInvariant(),
             Target        = options.Target,
             StagingTarget = stagingTarget,
-            LogFile       = Path.Combine(options.LogDir, $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log"),
+            LogFile       = run.LogFile,
             Status        = RunStatus.Running,
             DryRun        = false,
             StepsPlanned  = stepsPlanned,
@@ -130,7 +130,7 @@ public class PipelineCommandHandler(
 
             if (options.Notify)
                 await discord.NotifyAsync(
-                    "🖥️ mt pipeline: Step 1/3 — handbrake",
+                    "🖥️ mt pipeline: Step 1/3 — handbrake STARTED",
                     $"RunId {runId}\nTarget: {options.Target}", null, ct);
 
             // Wire up per-file progress reporting: each time a file completes, the
@@ -163,7 +163,7 @@ public class PipelineCommandHandler(
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at handbrake",
-                        $"Exit code {rc} — RunId {runId}", null, ct);
+                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
                 return rc;
             }
 
@@ -179,7 +179,7 @@ public class PipelineCommandHandler(
 
             if (options.Notify)
                 await discord.NotifyAsync(
-                    "🖥️ mt pipeline: Step 2/3 — normalize",
+                    "🖥️ mt pipeline: Step 2/3 — normalize STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
             var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts, ct);
@@ -195,7 +195,7 @@ public class PipelineCommandHandler(
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at normalize",
-                        $"Exit code {rc} — RunId {runId}", null, ct);
+                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
                 return rc;
             }
 
@@ -211,7 +211,7 @@ public class PipelineCommandHandler(
 
             if (options.Notify)
                 await discord.NotifyAsync(
-                    "🖥️ mt pipeline: Step 3/3 — promote",
+                    "🖥️ mt pipeline: Step 3/3 — promote STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
             var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, ct);
@@ -227,7 +227,7 @@ public class PipelineCommandHandler(
                 if (options.Notify)
                     await discord.NotifyAsync(
                         "❌ mt pipeline: Failed at promote",
-                        $"Exit code {rc} — RunId {runId}", null, ct);
+                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
                 return rc;
             }
 
