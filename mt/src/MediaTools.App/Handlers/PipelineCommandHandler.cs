@@ -16,7 +16,6 @@ public class PipelineCommandHandler(
     INormalizeRunner  normalize,
     IPromoteRunner    promote,
     IDiscordNotifier  discord,
-    ILogSink          log,
     IManifestWriter   manifests)
 {
     // Default script options used by the pipeline. For custom quality / encoding
@@ -34,12 +33,15 @@ public class PipelineCommandHandler(
     public async Task<int> HandleAsync(PipelineOptions options, CancellationToken ct)
     {
         var runId = options.RunId ?? PipelineRun.GenerateRunId();
+        using var pipelineLog = new TeeLogSink(
+            new ConsoleLogSink(),
+            PipelineRun.ComputePipelineLogFile(options.LogDir, runId));
 
         // Pipeline targets must be under incoming root (handbrake is the first step)
         var validation = TargetValidator.ValidateIncoming(options.Target, options.IncomingRoot);
         if (!validation.IsSuccess)
         {
-            log.Error($"[pipeline] Validation failed: {validation.Error}");
+            pipelineLog.Error($"[pipeline] Validation failed: {validation.Error}");
             return HandlerHelpers.ValidationExitCode;
         }
 
@@ -60,27 +62,27 @@ public class PipelineCommandHandler(
 
         bool ShouldRun(PipelineStep step) => step >= startStep && step <= untilStep;
 
-        log.Info($"[pipeline] run_id={runId}");
-        log.Info($"  Target:         {options.Target}");
-        log.Info($"  Kind:           {validated.Kind}");
-        log.Info($"  Mode:           {validated.Mode}");
-        log.Info($"  Staging target: {stagingTarget}");
-        log.Info("");
-        log.Info("  Plan:");
+        pipelineLog.Info($"[pipeline] run_id={runId}");
+        pipelineLog.Info($"  Target:         {options.Target}");
+        pipelineLog.Info($"  Kind:           {validated.Kind}");
+        pipelineLog.Info($"  Mode:           {validated.Mode}");
+        pipelineLog.Info($"  Staging target: {stagingTarget}");
+        pipelineLog.Info("");
+        pipelineLog.Info("  Plan:");
         if (ShouldRun(PipelineStep.Handbrake))
-            log.Info($"    [1/3] HandBrakeCLI (native) · target: {HandlerHelpers.Q(options.Target)} · run-id: {runId}");
+            pipelineLog.Info($"    [1/3] HandBrakeCLI (native) · target: {HandlerHelpers.Q(options.Target)} · run-id: {runId}");
         if (ShouldRun(PipelineStep.NormalizeAudio))
-            log.Info($"    [2/3] normalize_audio {HandlerHelpers.Q(stagingTarget)} --run-id {runId}");
+            pipelineLog.Info($"    [2/3] normalize_audio {HandlerHelpers.Q(stagingTarget)} --run-id {runId}");
         if (ShouldRun(PipelineStep.Promote))
-            log.Info($"    [3/3] promote {HandlerHelpers.Q(stagingTarget)} --run-id {runId}");
+            pipelineLog.Info($"    [3/3] promote {HandlerHelpers.Q(stagingTarget)} --run-id {runId}");
 
         if (options.DryRun)
             return 0;
 
-        log.Info("[pipeline] Awaiting confirmation...");
+        pipelineLog.Info("[pipeline] Awaiting confirmation...");
         if (!options.Yes && !HandlerHelpers.Confirm())
         {
-            log.Info("[pipeline] Cancelled.");
+            pipelineLog.Info("[pipeline] Cancelled.");
             return 0;
         }
 
@@ -92,7 +94,7 @@ public class PipelineCommandHandler(
             StagingRoot:  options.StagingRoot,
             LibraryRoot:  options.LibraryRoot,
             IncomingRoot: options.IncomingRoot,
-            LogFile:      PipelineRun.ComputeLogFile(options.LogDir));
+            LogFile:      PipelineRun.ComputePipelineLogFile(options.LogDir, runId));
 
         // ── Build & persist the initial manifest ─────────────────────────────
         // Written before any step runs so mt-dashboard shows the run as "running"
@@ -140,7 +142,7 @@ public class PipelineCommandHandler(
         // ── Step 1: Handbrake ────────────────────────────────────────────────
         if (ShouldRun(PipelineStep.Handbrake))
         {
-            log.Info("[pipeline] [1/3] Starting handbrake...");
+            pipelineLog.Info("[pipeline] [1/3] Starting handbrake...");
             manifest = manifest.WithStep("handbrake", s => s.AsStarted(DateTime.UtcNow));
             manifests.Write(manifest);
 
@@ -172,7 +174,7 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                log.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
+                pipelineLog.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
                 manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
@@ -183,13 +185,13 @@ public class PipelineCommandHandler(
                 return rc;
             }
 
-            log.Info("[pipeline] [1/3] handbrake complete.");
+            pipelineLog.Info("[pipeline] [1/3] handbrake complete.");
         }
 
         // ── Step 2: Normalize ────────────────────────────────────────────────
         if (ShouldRun(PipelineStep.NormalizeAudio))
         {
-            log.Info("[pipeline] [2/3] Starting normalize...");
+            pipelineLog.Info("[pipeline] [2/3] Starting normalize...");
             manifest = manifest.WithStep("normalize", s => s.AsStarted(DateTime.UtcNow));
             manifests.Write(manifest);
 
@@ -217,7 +219,7 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                log.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
+                pipelineLog.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
                 manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
@@ -228,13 +230,13 @@ public class PipelineCommandHandler(
                 return rc;
             }
 
-            log.Info("[pipeline] [2/3] normalize complete.");
+            pipelineLog.Info("[pipeline] [2/3] normalize complete.");
         }
 
         // ── Step 3: Promote ──────────────────────────────────────────────────
         if (ShouldRun(PipelineStep.Promote))
         {
-            log.Info("[pipeline] [3/3] Starting promote...");
+            pipelineLog.Info("[pipeline] [3/3] Starting promote...");
             manifest = manifest.WithStep("promote", s => s.AsStarted(DateTime.UtcNow));
             manifests.Write(manifest);
 
@@ -250,7 +252,7 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                log.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
+                pipelineLog.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
                 manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
                 manifests.Write(manifest);
 
@@ -261,10 +263,10 @@ public class PipelineCommandHandler(
                 return rc;
             }
 
-            log.Info("[pipeline] [3/3] promote complete.");
+            pipelineLog.Info("[pipeline] [3/3] promote complete.");
         }
 
-        log.Info("[pipeline] All steps completed.");
+        pipelineLog.Info("[pipeline] All steps completed.");
         manifest = manifest.WithStatus(RunStatus.Complete, 0, DateTime.UtcNow);
         manifests.Write(manifest);
 
@@ -280,7 +282,7 @@ public class PipelineCommandHandler(
         {
             // Ctrl+C was pressed. The runner that was active already killed its
             // child process and re-threw, so we just need to stamp the manifest.
-            log.Warn("[pipeline] Run cancelled by user (Ctrl+C).");
+            pipelineLog.Warn("[pipeline] Run cancelled by user (Ctrl+C).");
             var cancelledAt = DateTime.UtcNow;
             // Mark the step that was mid-run as Cancelled so the dashboard doesn't
             // show it stuck in "running". Pending steps that hadn't started are untouched.

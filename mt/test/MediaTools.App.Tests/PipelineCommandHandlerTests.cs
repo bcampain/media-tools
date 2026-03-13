@@ -90,7 +90,6 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        new ConsoleLogSink(),
         new NullManifestWriter());
 
     // Overload for cancellation tests: injects a cancelling runner and a writer
@@ -100,7 +99,6 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        new ConsoleLogSink(),
         writer);
 
     private static PipelineOptions OptionsFor(string target, bool dryRun = true) =>

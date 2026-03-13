@@ -11,6 +11,8 @@ namespace MediaTools.Infrastructure.Logging;
 // StreamWriter's file handle is flushed and closed when the step finishes.
 public class TeeLogSink(ILogSink inner, string logFilePath) : ILogSink, IDisposable
 {
+    private const string CentralTimeZoneId = "America/Chicago";
+
     private readonly StreamWriter _writer = new StreamWriter(
         new FileStream(logFilePath, FileMode.Append, FileAccess.Write, FileShare.Read));
 
@@ -20,7 +22,8 @@ public class TeeLogSink(ILogSink inner, string logFilePath) : ILogSink, IDisposa
 
     private void Append(string line)
     {
-        _writer.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {line}");
+        var centralNow = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, CentralTimeZoneId);
+        _writer.WriteLine($"{centralNow:yyyy-MM-dd HH:mm:ss} {line}");
         _writer.Flush();
     }
 

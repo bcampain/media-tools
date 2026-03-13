@@ -15,6 +15,8 @@ public record PipelineRun(
     string      LogFile
 )
 {
+    private const string CentralTimeZoneId = "America/Chicago";
+
     /// <summary>
     /// Generates a run ID matching the bash script format: date "+%m%d%y%H%M%S"
     /// Example: March 5, 2026 14:30:00 → "030526143000"
@@ -28,7 +30,14 @@ public record PipelineRun(
     /// any theoretical midnight-rollover skew between callers.
     /// </summary>
     public static string ComputeLogFile(string logDir) =>
-        Path.Combine(logDir, $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log");
+        Path.Combine(logDir, $"media-tools-mt-{TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, CentralTimeZoneId):MMddyyyy}.log");
+
+    /// <summary>
+    /// Pipeline-specific top-level logfile path.
+    /// Example: /logs/media-tools-mt-pipeline-030526143000.log
+    /// </summary>
+    public static string ComputePipelineLogFile(string logDir, string runId) =>
+        Path.Combine(logDir, $"media-tools-mt-pipeline-{runId}.log");
 
     /// <summary>
     /// Run-scoped per-step logfile path used by native pipeline steps.
