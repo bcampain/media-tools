@@ -7,3 +7,4 @@
 # .NET build output
 mt/**/bin/
 mt/**/obj/
+publish/

@@ -49,7 +49,7 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
             StagingRoot:  options.StagingRoot,
             LibraryRoot:  options.LibraryRoot,
             IncomingRoot: options.IncomingRoot,
-            LogDir:       options.LogDir
+            LogFile:      PipelineRun.ComputeLogFile(options.LogDir)
         );
 
         var encodeOptions = new HandbrakeScriptOptions(
@@ -70,6 +70,6 @@ public class HandbrakeCommandHandler(IHandbrakeRunner handbrake, IDiscordNotifie
 
         // Standalone `mt handbrake` invocations don't have a pipeline manifest,
         // so onProgress is null — file progress is only visible on the console.
-        return await handbrake.RunAsync(options.Target, run, encodeOptions, onProgress: null, ct);
+        return await handbrake.RunAsync(options.Target, run, encodeOptions, onProgress: null, log, ct);
     }
 }

@@ -1,16 +1,20 @@
 using System.Diagnostics;
 using MediaTools.Domain.Models;
 using MediaTools.Infrastructure.Logging;
-
 namespace MediaTools.Scripts;
 
 // Launches /bin/promote as a child process,
 // streams its stdout/stderr to the ILogSink, and returns the exit code.
-public class PromoteRunner(ILogSink log) : IPromoteRunner
+public class PromoteRunner : IPromoteRunner
 {
     private const string ScriptPath = "/usr/local/bin/promote";
 
-    public async Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
+    public async Task<int> RunAsync(
+        string target,
+        PipelineRun run,
+        PromoteScriptOptions options,
+        ILogSink log,
+        CancellationToken ct)
     {
         var args = BuildArgs(target, run, options);
         log.Info($"[promote] Invoking: {ScriptPath} {args}");

@@ -4,6 +4,7 @@ using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using MediaTools.App.FileSystem;
 using MediaTools.App.Handbrake;
+using MediaTools.App.Normalize;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
 using MediaTools.Infrastructure.Manifests;
@@ -15,15 +16,17 @@ using MediaTools.Cli.Commands;
 var services = new ServiceCollection();
 
 // Date-only filename means each day naturally gets its own file — no explicit
-// rollover logic needed. Each invocation computes today's date at startup.
+// rollover logic needed. Each invocation computes today's Central date at startup.
 // Format: /logs/media-tools-mt-MMddyyyy.log
+var centralNow = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/Chicago");
 var cliLogPath = Path.Combine(
     "/logs",
-    $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log");
+    $"media-tools-mt-{centralNow:MMddyyyy}.log");
 try { Directory.CreateDirectory("/logs"); } catch (Exception ex) { Console.Error.WriteLine($"[WARN] Could not create log directory: {ex.Message}"); }
 
 // TeeLogSink composes ConsoleLogSink (console output) with file appending.
-// All handlers and runners share the same singleton — one file per day.
+// Non-pipeline commands share this singleton (one file per day).
+// The pipeline command creates its own run-scoped top-level sink.
 services.AddSingleton<ILogSink>(new TeeLogSink(new ConsoleLogSink(), cliLogPath));
 
 // Singleton HttpClient for DiscordNotifier
@@ -42,9 +45,9 @@ services.AddSingleton<VideoFileScanner>();
 // It uses HandBrakeCLI directly and reports per-file progress to the manifest
 // so the mt-dashboard can render a live progress bar.
 services.AddSingleton<IHandbrakeRunner, NativeHandbrakeRunner>();
+services.AddSingleton<INormalizeRunner, NativeNormalizeRunner>();
 
-// Normalize and promote still delegate to their shell scripts.
-services.AddSingleton<INormalizeRunner, NormalizeRunner>();
+// "Promote" still delegates to its shell script
 services.AddSingleton<IPromoteRunner,   PromoteRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL")))

@@ -1,4 +1,5 @@
 using MediaTools.Domain.Models;
+using MediaTools.Infrastructure.Logging;
 
 namespace MediaTools.Scripts;
 
@@ -22,5 +23,6 @@ public interface IHandbrakeRunner
         PipelineRun                run,
         HandbrakeScriptOptions     options,
         Action<StepFileProgress>?  onProgress,
+        ILogSink                   log,
         CancellationToken          ct);
 }

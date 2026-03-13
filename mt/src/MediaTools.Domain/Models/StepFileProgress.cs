@@ -10,8 +10,9 @@ namespace MediaTools.Domain.Models;
 public record StepFileProgress
 {
     public required int TotalFiles { get; init; }
-    public required int ProcessedFiles { get; init; }  // complete + failed
+    public required int ProcessedFiles { get; init; }  // complete + skipped + failed
     public required int FailedFiles { get; init; }
+    public required int SkippedFiles { get; init; }   // output already existed; not re-encoded
     public string? CurrentFile { get; init; }  // filename only (not full path)
     public IReadOnlyList<FileJobRecord>? Files { get; init; }  // per-file detail; may be omitted for large sets
 }

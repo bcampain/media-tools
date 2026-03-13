@@ -3,6 +3,7 @@ using MediaTools.App.FileSystem;
 using MediaTools.Domain.FileMapping;
 using MediaTools.Domain.Models;
 using MediaTools.Infrastructure.Logging;
+using MediaTools.Infrastructure.Notifications;
 using MediaTools.Scripts;
 
 namespace MediaTools.App.Handbrake;
@@ -28,7 +29,9 @@ namespace MediaTools.App.Handbrake;
 /// Progress is reported after each file completes (or fails), and once at the start
 /// with all files as "pending" so the dashboard can show the total file count immediately.
 /// </summary>
-public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHandbrakeRunner
+public class NativeHandbrakeRunner(
+    VideoFileScanner scanner, 
+    IDiscordNotifier discord) : IHandbrakeRunner
 {
     // Ordered list of paths to check for HandBrakeCLI at startup.
     private static readonly string[] CandidatePaths =
@@ -50,6 +53,7 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
         PipelineRun               run,
         HandbrakeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
+        ILogSink                  log,
         CancellationToken         ct)
     {
         var hbPath = _handBrakePath.Value;
@@ -72,6 +76,10 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
         {
             log.Warn($"[handbrake] No video files found under: {target}");
             log.Warn("[handbrake] Nothing to do. Exiting with success.");
+            await discord.NotifyAsync(
+                "⚠️ Step 1 of 3: HandBrake finished",
+                $"Target: {target} | run_id={run.RunId}\nNo source video files found, nothing to do.",
+                run.LogFile, ct);
             return 0;
         }
 
@@ -90,7 +98,9 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
         // Emit initial progress so the dashboard shows total count immediately
         ReportProgress(onProgress, jobs, currentFile: null);
 
-        var failedCount = 0;
+        var failedCount  = 0;
+        var skippedCount = 0;
+        var createdCount = 0;
 
         for (var i = 0; i < jobs.Count; i++)
         {
@@ -110,8 +120,9 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
             if (!options.Force && File.Exists(job.OutputPath))
             {
                 log.Info($"[handbrake]   Skipping — output already exists (use --force to re-encode).");
-                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = DateTime.UtcNow, ExitCode = 0 };
+                jobs[i] = jobs[i] with { Status = StepStatus.Skipped, CompletedAt = DateTime.UtcNow, ExitCode = 0 };
                 ReportProgress(onProgress, jobs, currentFile: null);
+                skippedCount++;
                 continue;
             }
 
@@ -131,20 +142,47 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
             }
 
             // ── Run HandBrakeCLI ──────────────────────────────────────────────
-            var rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, ct);
+            int rc;
+            try
+            {
+                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, log, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Mark the in-progress file as Cancelled before the exception propagates
+                // so onProgress carries an accurate file list to the manifest.
+                jobs[i] = jobs[i] with { Status = StepStatus.Cancelled, CompletedAt = DateTime.UtcNow };
+                ReportProgress(onProgress, jobs, currentFile: null);
+                throw;
+            }
 
             var completedAt = DateTime.UtcNow;
             if (rc == 0)
             {
                 log.Info($"[handbrake]   ✓ Done: {Path.GetFileName(job.OutputPath)}");
+                
+                var createdTitle = $"☑️ HandBrake: Created output mp4 ({i + 1}/{jobs.Count})";
+                var createdMessage = $"""
+                               Target: {target} | run_id: {run.RunId}
+                               Created: {Path.GetFileName(job.OutputPath)}
+                               Original: {Path.GetFileName(job.InputPath)}
+                               """;
+                await discord.NotifyAsync(createdTitle, createdMessage, null, ct);
+
                 jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = completedAt, ExitCode = 0 };
+                createdCount++;
             }
             else
             {
                 log.Error($"[handbrake]   ✗ Failed (exit {rc}): {fileName}");
 
                 // Remove partial output to avoid leaving a corrupt file in staging
-                TryDeletePartialOutput(job.OutputPath);
+                TryDeletePartialOutput(job.OutputPath, log);
+
+                await discord.NotifyAsync(
+                    $"❌ HandBrake: Failed to process file ({i + 1}/{jobs.Count})",
+                    $"Target: {target} | run_id={run.RunId}\nFailed file: {fileName}",
+                    run.LogFile, ct);
 
                 jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = rc };
                 failedCount++;
@@ -153,9 +191,11 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
             ReportProgress(onProgress, jobs, currentFile: null);
         }
 
-        var successCount = jobs.Count - failedCount;
-        log.Info($"[handbrake] Complete: {successCount}/{jobs.Count} succeeded" +
+        log.Info($"[handbrake] Complete: {createdCount + skippedCount}/{jobs.Count} succeeded" +
                  (failedCount > 0 ? $", {failedCount} failed" : ""));
+
+        var completeMessage = $"Target: {target} | run_id={run.RunId} | created={createdCount} skipped={skippedCount} failed={failedCount}";
+        await discord.NotifyAsync("✅ Step 1 of 3: HandBrake finished", completeMessage, run.LogFile, ct);
 
         return failedCount > 0 ? 1 : 0;
     }
@@ -167,6 +207,7 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
         string                 inputPath,
         string                 outputPath,
         HandbrakeScriptOptions options,
+        ILogSink               log,
         CancellationToken      ct)
     {
         var args = BuildHandBrakeArgs(inputPath, outputPath, options);
@@ -283,10 +324,12 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
         // Single pass — avoids iterating the job list twice per progress update.
         var processed = 0;
         var failed    = 0;
+        var skipped   = 0;
         foreach (var j in jobs)
         {
-            if (j.Status is StepStatus.Complete or StepStatus.Failed) processed++;
-            if (j.Status == StepStatus.Failed) failed++;
+            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped) processed++;
+            if (j.Status == StepStatus.Failed)  failed++;
+            if (j.Status == StepStatus.Skipped) skipped++;
         }
 
         onProgress(new StepFileProgress
@@ -294,6 +337,7 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
             TotalFiles     = jobs.Count,
             ProcessedFiles = processed,
             FailedFiles    = failed,
+            SkippedFiles   = skipped,
             CurrentFile    = currentFile,
             // Include the full file list so the dashboard can render per-file indicators.
             // For very large sets this could be trimmed, but typical media batches are
@@ -330,7 +374,7 @@ public class NativeHandbrakeRunner(VideoFileScanner scanner, ILogSink log) : IHa
     /// Best-effort cleanup of a partially-written output file after encode failure.
     /// Leaves a warning in the log if deletion fails but never throws.
     /// </summary>
-    private void TryDeletePartialOutput(string outputPath)
+    private static void TryDeletePartialOutput(string outputPath, ILogSink log)
     {
         if (!File.Exists(outputPath)) return;
         try

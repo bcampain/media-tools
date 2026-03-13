@@ -1,16 +1,8 @@
 # /srv/media-tools/Dockerfile
+# The mt CLI binary is built locally (or via CI) before running docker compose build.
+# Run ./build.sh to publish and build the image in one step.
 
-# ── Stage 1: build the mt CLI ─────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
-COPY mt/ .
-RUN dotnet publish src/MediaTools.Cli/MediaTools.Cli.csproj \
-      -c Release \
-      -r linux-x64 \
-      --self-contained \
-      -o /publish
-
-# ── Stage 2: media-tools runtime image ───────────────────────────────────────
+# ── Runtime image ─────────────────────────────────────────────────────────────
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -38,8 +30,8 @@ RUN apt-get update && \
 COPY bin/ /usr/local/bin/
 RUN chmod +x /usr/local/bin/*
 
-# Copy mt CLI (self-contained — no .NET runtime required in this image)
-COPY --from=build /publish /usr/local/lib/mt/
+# Copy mt CLI (self-contained binary, built locally via ./build.sh)
+COPY publish/ /usr/local/lib/mt/
 RUN ln -s /usr/local/lib/mt/mt /usr/local/bin/mt
 
 WORKDIR /work

@@ -47,7 +47,7 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
             StagingRoot:    options.StagingRoot,
             LibraryRoot:    options.LibraryRoot,
             IncomingRoot:   options.IncomingRoot,
-            LogDir:         options.LogDir
+            LogFile:        PipelineRun.ComputeLogFile(options.LogDir)
         );
 
         var scriptOptions = new NormalizeScriptOptions(
@@ -69,7 +69,8 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
                         """;
         await discord.NotifyAsync(title, message, null, ct);
 
-        return await normalize.RunAsync(options.Target, run, scriptOptions, ct);
+        // Standalone invocations don't have a manifest to update, so progress is not wired up.
+        return await normalize.RunAsync(options.Target, run, scriptOptions, onProgress: null, log, ct);
     }
 
     // internal for unit testability.

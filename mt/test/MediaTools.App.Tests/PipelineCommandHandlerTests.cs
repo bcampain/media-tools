@@ -29,19 +29,20 @@ public class PipelineCommandHandlerTests
     {
         public Task<int> RunAsync(
             string target, PipelineRun run, HandbrakeScriptOptions options,
-            Action<StepFileProgress>? onProgress, CancellationToken ct)
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
     private class NullNormalizeRunner : INormalizeRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options, CancellationToken ct)
+        public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options,
+                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
     private class NullPromoteRunner : IPromoteRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
+        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
@@ -58,6 +59,30 @@ public class PipelineCommandHandlerTests
         public void Write(PipelineRunManifest manifest) { }
     }
 
+    // Records every manifest that was written so tests can assert on the final state.
+    private class CapturingManifestWriter : IManifestWriter
+    {
+        public List<PipelineRunManifest> Written { get; } = [];
+        public void Write(PipelineRunManifest manifest) => Written.Add(manifest);
+
+        // Convenience: the last manifest written is the final state.
+        public PipelineRunManifest? Last => Written.Count > 0 ? Written[^1] : null;
+    }
+
+    // Simulates a runner being interrupted mid-execution (e.g. Ctrl+C).
+    // Calls ct.ThrowIfCancellationRequested() so a pre-cancelled token causes
+    // an OperationCanceledException the same way a real runner would produce it.
+    private class CancellingHandbrakeRunner : IHandbrakeRunner
+    {
+        public Task<int> RunAsync(
+            string target, PipelineRun run, HandbrakeScriptOptions options,
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(0);
+        }
+    }
+
     // ── Factory helpers ──────────────────────────────────────────────────────
 
     private static PipelineCommandHandler MakeHandler() => new(
@@ -65,8 +90,16 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        new ConsoleLogSink(),
         new NullManifestWriter());
+
+    // Overload for cancellation tests: injects a cancelling runner and a writer
+    // that captures every manifest snapshot so we can assert on the final status.
+    private static PipelineCommandHandler MakeCancellingHandler(CapturingManifestWriter writer) => new(
+        new CancellingHandbrakeRunner(),
+        new NullNormalizeRunner(),
+        new NullPromoteRunner(),
+        new NullDiscordNotifier(),
+        writer);
 
     private static PipelineOptions OptionsFor(string target, bool dryRun = true) =>
         new(
@@ -110,6 +143,67 @@ public class PipelineCommandHandlerTests
         var rc = await MakeHandler().HandleAsync(OptionsFor("/incoming/tv/My Show/Season 1"), CancellationToken.None);
 
         rc.Should().Be(2);
+    }
+
+    // ── Cancellation tests ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task HandleAsync_CancelledDuringStep_ReturnsExitCode130()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // Pre-cancel so the first runner call immediately throws
+
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeCancellingHandler(writer);
+        // Yes: true skips the interactive confirmation prompt
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true };
+
+        var rc = await handler.HandleAsync(options, cts.Token);
+
+        rc.Should().Be(130);
+    }
+
+    [Fact]
+    public async Task HandleAsync_CancelledDuringStep_WritesManifestWithCancelledStatus()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeCancellingHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true };
+
+        await handler.HandleAsync(options, cts.Token);
+
+        // The final manifest snapshot must reflect the cancelled run state.
+        writer.Last.Should().NotBeNull();
+        writer.Last!.Status.Should().Be(RunStatus.Cancelled);
+        writer.Last!.ExitCode.Should().Be(130);
+        writer.Last!.CompletedAt.Should().NotBeNull();
+        writer.Last!.StepLogFiles.Should().ContainKey("handbrake");
+        writer.Last!.StepLogFiles.Should().ContainKey("normalize");
+        writer.Last!.StepLogFiles.Should().ContainKey("promote");
+        writer.Last!.StepLogFiles.Should().NotContainKey("pipeline");
+        writer.Last!.Steps.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.LogFile));
+    }
+
+    [Fact]
+    public async Task HandleAsync_CancelledDuringStep_MarksActiveStepAsCancelled()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeCancellingHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true };
+
+        await handler.HandleAsync(options, cts.Token);
+
+        // The step that was mid-run (handbrake) must be Cancelled, not stuck in Running.
+        // Pending steps that never started should remain Pending.
+        var steps = writer.Last!.Steps;
+        steps.Should().Contain(s => s.Name == "handbrake" && s.Status == StepStatus.Cancelled);
+        steps.Should().NotContain(s => s.Status == StepStatus.Running);
     }
 
     // ── Valid target / dry-run tests ─────────────────────────────────────────
