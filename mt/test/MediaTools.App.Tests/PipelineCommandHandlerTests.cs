@@ -35,7 +35,8 @@ public class PipelineCommandHandlerTests
 
     private class NullNormalizeRunner : INormalizeRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options, CancellationToken ct)
+        public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options,
+                                  Action<StepFileProgress>? onProgress, CancellationToken ct)
             => Task.FromResult(0);
     }
 

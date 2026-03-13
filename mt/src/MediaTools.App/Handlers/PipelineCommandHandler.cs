@@ -185,7 +185,19 @@ public class PipelineCommandHandler(
                     "🖥️ mt pipeline: Step 2/3 — normalize STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
-            var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts, ct);
+            // Per-file progress reporting for the normalize step
+            var normalizeManifest = manifest;
+            void OnNormalizeProgress(StepFileProgress fp)
+            {
+                normalizeManifest = normalizeManifest.WithStepFileProgress("normalize", fp);
+                manifests.Write(normalizeManifest);
+            }
+
+            var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts,
+                onProgress: OnNormalizeProgress, ct);
+
+            // Sync the outer manifest reference with any progress updates that arrived.
+            manifest = normalizeManifest;
             manifest = manifest.WithStep("normalize", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 

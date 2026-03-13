@@ -4,6 +4,7 @@ using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 using MediaTools.App.FileSystem;
 using MediaTools.App.Handbrake;
+using MediaTools.App.Normalize;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
 using MediaTools.Infrastructure.Manifests;
@@ -42,9 +43,9 @@ services.AddSingleton<VideoFileScanner>();
 // It uses HandBrakeCLI directly and reports per-file progress to the manifest
 // so the mt-dashboard can render a live progress bar.
 services.AddSingleton<IHandbrakeRunner, NativeHandbrakeRunner>();
+services.AddSingleton<INormalizeRunner, NativeNormalizeRunner>();
 
-// Normalize and promote still delegate to their shell scripts.
-services.AddSingleton<INormalizeRunner, NormalizeRunner>();
+// "Promote" still delegates to its shell script
 services.AddSingleton<IPromoteRunner,   PromoteRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL")))
