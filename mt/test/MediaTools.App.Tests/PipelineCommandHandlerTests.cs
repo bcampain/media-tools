@@ -29,20 +29,20 @@ public class PipelineCommandHandlerTests
     {
         public Task<int> RunAsync(
             string target, PipelineRun run, HandbrakeScriptOptions options,
-            Action<StepFileProgress>? onProgress, CancellationToken ct)
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
     private class NullNormalizeRunner : INormalizeRunner
     {
         public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options,
-                                  Action<StepFileProgress>? onProgress, CancellationToken ct)
+                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
     private class NullPromoteRunner : IPromoteRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, CancellationToken ct)
+        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
@@ -76,7 +76,7 @@ public class PipelineCommandHandlerTests
     {
         public Task<int> RunAsync(
             string target, PipelineRun run, HandbrakeScriptOptions options,
-            Action<StepFileProgress>? onProgress, CancellationToken ct)
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
             return Task.FromResult(0);
@@ -182,6 +182,11 @@ public class PipelineCommandHandlerTests
         writer.Last!.Status.Should().Be(RunStatus.Cancelled);
         writer.Last!.ExitCode.Should().Be(130);
         writer.Last!.CompletedAt.Should().NotBeNull();
+        writer.Last!.StepLogFiles.Should().ContainKey("handbrake");
+        writer.Last!.StepLogFiles.Should().ContainKey("normalize");
+        writer.Last!.StepLogFiles.Should().ContainKey("promote");
+        writer.Last!.StepLogFiles.Should().NotContainKey("pipeline");
+        writer.Last!.Steps.Should().OnlyContain(s => !string.IsNullOrWhiteSpace(s.LogFile));
     }
 
     [Fact]

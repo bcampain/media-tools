@@ -47,7 +47,7 @@ namespace MediaTools.App.Normalize;
 ///   destination only after a successful encode. This prevents partial files from ever
 ///   appearing at the final path.
 /// </summary>
-public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INormalizeRunner
+public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
 {
     // Ordered lists of candidate paths checked at startup.
     private static readonly string[] FfmpegCandidatePaths =
@@ -84,6 +84,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         PipelineRun               run,
         NormalizeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
+        ILogSink                  log,
         CancellationToken         ct)
     {
         var ffmpegPath  = _ffmpegPath.Value;
@@ -211,12 +212,12 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
 
             if (options.OnePass)
             {
-                rc = await ApplyOnePassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, ct);
+                rc = await ApplyOnePassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, log, ct);
             }
             else
             {
                 // Two-pass: measure (pass 1) then apply with measurements (pass 2).
-                var measure = await MeasureAsync(ffmpegPath, job.InputPath, options, addStereo, ct);
+                var measure = await MeasureAsync(ffmpegPath, job.InputPath, options, addStereo, log, ct);
 
                 if (measure.IsSilent)
                 {
@@ -275,7 +276,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
                              $"offset={measure.Stereo.TargetOffset}");
                 }
 
-                rc = await ApplyTwoPassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, measure, ct);
+                    rc = await ApplyTwoPassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, measure, log, ct);
             }
 
             var completedAt = DateTime.UtcNow;
@@ -291,7 +292,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
                 catch (Exception ex)
                 {
                     log.Error($"[normalize]   Failed to finalize output: {ex.Message}");
-                    TryDeleteTemp(tmpFile);
+                    TryDeleteTemp(tmpFile, log);
                     jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = 1 };
                     ReportProgress(onProgress, jobs, currentFile: null);
                     failedCount++;
@@ -312,7 +313,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
             else
             {
                 log.Error($"[normalize]   ✗ FAILED (exit {rc}): {fileName}");
-                TryDeleteTemp(tmpFile);
+                TryDeleteTemp(tmpFile, log);
                 await discord.NotifyAsync(
                     $"❌ ffmpeg: Failed to normalize audio ({i + 1}/{jobs.Count})",
                     $"Target: {target} | run_id={run.RunId}\nFailed file: {fileName}",
@@ -482,15 +483,16 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         string                 inputFile,
         NormalizeScriptOptions options,
         bool                   addStereo,
+        ILogSink               log,
         CancellationToken      ct)
     {
         if (addStereo)
         {
             log.Info("[normalize]   Measuring surround (5.1) loudness...");
-            var meas51 = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, ct);
+            var meas51 = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, log, ct);
 
             log.Info("[normalize]   Measuring stereo downmix loudness...");
-            var measSt = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: StereoPanFilter, ct);
+            var measSt = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: StereoPanFilter, log, ct);
 
             if (!IsLoudnormMeasValid(meas51) || !IsLoudnormMeasValid(measSt))
                 return new MeasureResult(null, null, IsSilent: true);
@@ -500,7 +502,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         else
         {
             log.Info("[normalize]   Measuring loudness...");
-            var meas = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, ct);
+            var meas = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, log, ct);
 
             if (!IsLoudnormMeasValid(meas))
                 return new MeasureResult(null, null, IsSilent: true);
@@ -530,6 +532,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         string                 inputFile,
         NormalizeScriptOptions options,
         string?                preFilter,
+        ILogSink               log,
         CancellationToken      ct)
     {
         var loudnormFilter =
@@ -570,7 +573,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         catch (OperationCanceledException) { proc.Kill(entireProcessTree: true); throw; }
         proc.WaitForExit();
 
-        return ExtractLoudnormJson(stderrBuf.ToString());
+        return ExtractLoudnormJson(stderrBuf.ToString(), log);
     }
 
     /// <summary>
@@ -580,7 +583,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
     /// Mirrors the bash extract_loudnorm_json() awk script: finds the first '{',
     /// tracks brace depth, and captures everything up to the matching '}'.
     /// </summary>
-    private LoudnormMeasurement? ExtractLoudnormJson(string ffmpegOutput)
+    private static LoudnormMeasurement? ExtractLoudnormJson(string ffmpegOutput, ILogSink log)
     {
         var startIdx = ffmpegOutput.IndexOf('{');
         if (startIdx < 0) return null;
@@ -683,6 +686,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         string                 tmpFile,
         NormalizeScriptOptions options,
         bool                   addStereo,
+        ILogSink               log,
         CancellationToken      ct)
     {
         var simpleFilter  = $"loudnorm=I={options.TargetI}:TP={options.TruePeak}:LRA={options.Lra}";
@@ -714,7 +718,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
                    Q(tmpFile);
         }
 
-        return await RunFfmpegAsync(ffmpegPath, args, ct);
+        return await RunFfmpegAsync(ffmpegPath, args, log, ct);
     }
 
     /// <summary>
@@ -734,6 +738,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
         NormalizeScriptOptions options,
         bool                   addStereo,
         MeasureResult          measure,
+        ILogSink               log,
         CancellationToken      ct)
     {
         string args;
@@ -767,7 +772,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
                    Q(tmpFile);
         }
 
-        return await RunFfmpegAsync(ffmpegPath, args, ct);
+        return await RunFfmpegAsync(ffmpegPath, args, log, ct);
     }
 
     /// <summary>
@@ -775,7 +780,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
     /// Both streams are forwarded verbatim — ffmpeg writes progress to stderr and it should
     /// be visible in the terminal so the operator can monitor encoding in real-time.
     /// </summary>
-    private async Task<int> RunFfmpegAsync(string ffmpegPath, string args, CancellationToken ct)
+    private async Task<int> RunFfmpegAsync(string ffmpegPath, string args, ILogSink log, CancellationToken ct)
     {
         log.Info($"[normalize]   cmd: {ffmpegPath} {args}");
 
@@ -844,7 +849,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord, ILogSink log) : INo
     /// Best-effort cleanup of a partially-written temp file after encode failure.
     /// Logs a warning if deletion fails but never throws.
     /// </summary>
-    private void TryDeleteTemp(string tmpPath)
+    private static void TryDeleteTemp(string tmpPath, ILogSink log)
     {
         if (!File.Exists(tmpPath)) return;
         try

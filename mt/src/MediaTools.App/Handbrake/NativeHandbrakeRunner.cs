@@ -31,8 +31,7 @@ namespace MediaTools.App.Handbrake;
 /// </summary>
 public class NativeHandbrakeRunner(
     VideoFileScanner scanner, 
-    IDiscordNotifier discord, 
-    ILogSink log) : IHandbrakeRunner
+    IDiscordNotifier discord) : IHandbrakeRunner
 {
     // Ordered list of paths to check for HandBrakeCLI at startup.
     private static readonly string[] CandidatePaths =
@@ -54,6 +53,7 @@ public class NativeHandbrakeRunner(
         PipelineRun               run,
         HandbrakeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
+        ILogSink                  log,
         CancellationToken         ct)
     {
         var hbPath = _handBrakePath.Value;
@@ -145,7 +145,7 @@ public class NativeHandbrakeRunner(
             int rc;
             try
             {
-                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, ct);
+                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, log, ct);
             }
             catch (OperationCanceledException)
             {
@@ -177,7 +177,7 @@ public class NativeHandbrakeRunner(
                 log.Error($"[handbrake]   ✗ Failed (exit {rc}): {fileName}");
 
                 // Remove partial output to avoid leaving a corrupt file in staging
-                TryDeletePartialOutput(job.OutputPath);
+                TryDeletePartialOutput(job.OutputPath, log);
 
                 await discord.NotifyAsync(
                     $"❌ HandBrake: Failed to process file ({i + 1}/{jobs.Count})",
@@ -207,6 +207,7 @@ public class NativeHandbrakeRunner(
         string                 inputPath,
         string                 outputPath,
         HandbrakeScriptOptions options,
+        ILogSink               log,
         CancellationToken      ct)
     {
         var args = BuildHandBrakeArgs(inputPath, outputPath, options);
@@ -373,7 +374,7 @@ public class NativeHandbrakeRunner(
     /// Best-effort cleanup of a partially-written output file after encode failure.
     /// Leaves a warning in the log if deletion fails but never throws.
     /// </summary>
-    private void TryDeletePartialOutput(string outputPath)
+    private static void TryDeletePartialOutput(string outputPath, ILogSink log)
     {
         if (!File.Exists(outputPath)) return;
         try

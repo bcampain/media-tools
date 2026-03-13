@@ -1,7 +1,7 @@
 services:
   media-tools:
     build: .
-    image: media-tools:0.1
+    image: media-tools:0.2
     container_name: media-tools
     environment:
       - TZ=America/Chicago

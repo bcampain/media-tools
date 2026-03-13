@@ -65,7 +65,7 @@ public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier disc
                         """;
         await discord.NotifyAsync(title, message, null, ct);
 
-        return await promote.RunAsync(options.Target, run, scriptOptions, ct);
+        return await promote.RunAsync(options.Target, run, scriptOptions, log, ct);
     }
 
     // internal for unit testability.

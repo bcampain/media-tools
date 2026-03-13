@@ -103,6 +103,13 @@ public class PipelineCommandHandler(
         if (ShouldRun(PipelineStep.NormalizeAudio)) stepsPlanned.Add("normalize");
         if (ShouldRun(PipelineStep.Promote))        stepsPlanned.Add("promote");
 
+        // Derive log file paths from the planned steps so the dictionary keys
+        // always match exactly — no risk of KeyNotFoundException if a step is
+        // added or skipped via --step / --until.
+        var stepLogFiles = stepsPlanned.ToDictionary(
+            s => s,
+            s => PipelineRun.ComputeStepLogFile(options.LogDir, runId, s));
+
         var manifest = new PipelineRunManifest
         {
             RunId         = runId,
@@ -112,11 +119,17 @@ public class PipelineCommandHandler(
             Target        = options.Target,
             StagingTarget = stagingTarget,
             LogFile       = run.LogFile,
+            StepLogFiles      = stepLogFiles,
             Status        = RunStatus.Running,
             DryRun        = false,
             StepsPlanned  = stepsPlanned,
             Steps         = stepsPlanned
-                                .Select(s => new StepRecord { Name = s, Status = StepStatus.Pending })
+                                .Select(s => new StepRecord
+                                {
+                                    Name    = s,
+                                    Status  = StepStatus.Pending,
+                                    LogFile = stepLogFiles[s]
+                                })
                                 .ToList()
         };
         manifests.Write(manifest);
@@ -150,8 +163,9 @@ public class PipelineCommandHandler(
                 manifests.Write(handbrakeManifest);
             }
 
+            using var handbrakeLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["handbrake"]);
             var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts,
-                onProgress: OnHandbrakeProgress, ct);
+                onProgress: OnHandbrakeProgress, log: handbrakeLog, ct);
 
             manifest = manifest.WithStep("handbrake", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
@@ -193,8 +207,9 @@ public class PipelineCommandHandler(
                 manifests.Write(normalizeManifest);
             }
 
+            using var normalizeLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["normalize"]);
             var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts,
-                onProgress: OnNormalizeProgress, ct);
+                onProgress: OnNormalizeProgress, log: normalizeLog, ct);
 
             // manifest is already up-to-date via OnNormalizeProgress; stamp the step result
             manifest = manifest.WithStep("normalize", s => s.AsCompleted(DateTime.UtcNow, rc));
@@ -228,7 +243,8 @@ public class PipelineCommandHandler(
                     "🖥️ mt pipeline: Step 3/3 — promote STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
-            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, ct);
+            using var promoteLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["promote"]);
+            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, promoteLog, ct);
             manifest = manifest.WithStep("promote", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 

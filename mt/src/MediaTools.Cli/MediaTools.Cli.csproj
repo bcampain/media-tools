@@ -17,6 +17,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Version>1.2</Version>
     <AssemblyName>mt</AssemblyName>
     <RootNamespace>MediaTools.Cli</RootNamespace>
   </PropertyGroup>

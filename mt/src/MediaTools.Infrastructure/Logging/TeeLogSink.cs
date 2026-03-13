@@ -6,12 +6,23 @@ namespace MediaTools.Infrastructure.Logging;
 //
 // This keeps ConsoleLogSink focused on one job, and lets us add file logging
 // purely at the composition root (Program.cs) without touching any handlers.
-public class TeeLogSink(ILogSink inner, string logFilePath) : ILogSink
+//
+// Implements IDisposable: Callers should use `using var` to guarantee the 
+// StreamWriter's file handle is flushed and closed when the step finishes.
+public class TeeLogSink(ILogSink inner, string logFilePath) : ILogSink, IDisposable
 {
+    private readonly StreamWriter _writer = new StreamWriter(
+        new FileStream(logFilePath, FileMode.Append, FileAccess.Write, FileShare.Read));
+
     public void Info(string message)  { inner.Info(message);  Append($"[INFO]  {message}"); }
     public void Warn(string message)  { inner.Warn(message);  Append($"[WARN]  {message}"); }
     public void Error(string message) { inner.Error(message); Append($"[ERROR] {message}"); }
 
-    private void Append(string line) =>
-        File.AppendAllText(logFilePath, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}");
+    private void Append(string line)
+    {
+        _writer.WriteLine($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} {line}");
+        _writer.Flush();
+    }
+
+    public void Dispose() => _writer.Dispose();
 }

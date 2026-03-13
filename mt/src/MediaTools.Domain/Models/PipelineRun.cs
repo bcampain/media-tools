@@ -29,4 +29,11 @@ public record PipelineRun(
     /// </summary>
     public static string ComputeLogFile(string logDir) =>
         Path.Combine(logDir, $"media-tools-mt-{DateTime.UtcNow:MMddyyyy}.log");
+
+    /// <summary>
+    /// Run-scoped per-step logfile path used by native pipeline steps.
+    /// Example: /logs/media-tools-mt-030526143000-handbrake.log
+    /// </summary>
+    public static string ComputeStepLogFile(string logDir, string runId, string stepName) =>
+        Path.Combine(logDir, $"media-tools-mt-{stepName}-{runId}.log");
 }

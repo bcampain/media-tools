@@ -6,13 +6,13 @@ namespace MediaTools.Scripts;
 
 // Launches /bin/normalize_audio as a child process,
 // streams its stdout/stderr to the ILogSink, and returns the exit code.
-public class NormalizeRunner(ILogSink log) : INormalizeRunner
+public class NormalizeRunner : INormalizeRunner
 {
     private const string ScriptPath = "/usr/local/bin/normalize_audio";
 
     // onProgress not used here as the script manages its own progress reporting (no manifest updates)
     public async Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options,
-                                    Action<StepFileProgress>? onProgress, CancellationToken ct)
+                                    Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
     {
         var args = BuildArgs(target, run, options);
         log.Info($"[normalize] Invoking: {ScriptPath} {args}");

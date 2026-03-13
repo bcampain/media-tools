@@ -1,4 +1,5 @@
 using MediaTools.Domain.Models;
+using MediaTools.Infrastructure.Logging;
 
 namespace MediaTools.Scripts;
 
@@ -9,5 +10,6 @@ public interface INormalizeRunner
         PipelineRun               run,
         NormalizeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
+        ILogSink                  log,
         CancellationToken         ct);
 }

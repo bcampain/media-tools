@@ -7,6 +7,7 @@ public record StepRecord
 {
     public required string          Name          { get; init; }      // "handbrake" | "normalize" | "promote"
     public required StepStatus      Status        { get; init; }
+    public          string?         LogFile       { get; init; }
     public          DateTime?       StartedAt     { get; init; }
     public          DateTime?       CompletedAt   { get; init; }
     public          int?            ExitCode      { get; init; }
@@ -53,6 +54,7 @@ public record PipelineRunManifest
     public required string          Target        { get; init; }
     public required string          StagingTarget { get; init; }
     public required string          LogFile       { get; init; }
+    public required Dictionary<string, string> StepLogFiles { get; init; }
     public required RunStatus       Status        { get; init; }
     public          int?            ExitCode      { get; init; }
     public          bool            DryRun        { get; init; }

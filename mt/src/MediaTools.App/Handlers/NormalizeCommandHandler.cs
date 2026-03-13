@@ -70,7 +70,7 @@ public class NormalizeCommandHandler(INormalizeRunner normalize, IDiscordNotifie
         await discord.NotifyAsync(title, message, null, ct);
 
         // Standalone invocations don't have a manifest to update, so progress is not wired up.
-        return await normalize.RunAsync(options.Target, run, scriptOptions, onProgress: null, ct);
+        return await normalize.RunAsync(options.Target, run, scriptOptions, onProgress: null, log, ct);
     }
 
     // internal for unit testability.
