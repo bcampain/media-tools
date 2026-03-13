@@ -142,7 +142,19 @@ public class NativeHandbrakeRunner(
             }
 
             // ── Run HandBrakeCLI ──────────────────────────────────────────────
-            var rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, ct);
+            int rc;
+            try
+            {
+                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Mark the in-progress file as Cancelled before the exception propagates
+                // so onProgress carries an accurate file list to the manifest.
+                jobs[i] = jobs[i] with { Status = StepStatus.Cancelled, CompletedAt = DateTime.UtcNow };
+                ReportProgress(onProgress, jobs, currentFile: null);
+                throw;
+            }
 
             var completedAt = DateTime.UtcNow;
             if (rc == 0)

@@ -146,14 +146,13 @@ public class PipelineCommandHandler(
             void OnHandbrakeProgress(StepFileProgress fp)
             {
                 handbrakeManifest = handbrakeManifest.WithStepFileProgress("handbrake", fp);
+                manifest = handbrakeManifest; // keep outer ref live so the cancellation handler sees latest file progress
                 manifests.Write(handbrakeManifest);
             }
 
             var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts,
                 onProgress: OnHandbrakeProgress, ct);
 
-            // Sync the outer manifest reference with any progress updates that arrived
-            manifest = handbrakeManifest;
             manifest = manifest.WithStep("handbrake", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 
@@ -190,14 +189,14 @@ public class PipelineCommandHandler(
             void OnNormalizeProgress(StepFileProgress fp)
             {
                 normalizeManifest = normalizeManifest.WithStepFileProgress("normalize", fp);
+                manifest = normalizeManifest; // keep outer ref live so the cancellation handler sees latest file progress
                 manifests.Write(normalizeManifest);
             }
 
             var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts,
                 onProgress: OnNormalizeProgress, ct);
 
-            // Sync the outer manifest reference with any progress updates that arrived.
-            manifest = normalizeManifest;
+            // manifest is already up-to-date via OnNormalizeProgress; stamp the step result
             manifest = manifest.WithStep("normalize", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 
