@@ -6,10 +6,9 @@ namespace MediaTools.Scripts;
 /// <summary>
 /// Contract for the handbrake encoding step.
 ///
-/// Unlike the other runners (normalize, promote) which still delegate to shell scripts
-/// and implement the generic <IProcessRunner>, the handbrake runner is now a
-/// native C# implementation that processes multiple files and reports per-file progress
-/// so the mt-dashboard can display a progress bar while encoding is running.
+/// The handbrake runner is a native C# implementation that processes multiple
+/// files and reports per-file progress so the mt-dashboard can display a
+/// progress bar while encoding is running.
 ///
 /// The <paramref name="onProgress"/> callback is optional:
 /// - PipelineCommandHandler provides a callback that writes file progress to the manifest.

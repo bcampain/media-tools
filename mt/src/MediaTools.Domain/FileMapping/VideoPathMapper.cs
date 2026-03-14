@@ -5,8 +5,7 @@ namespace MediaTools.Domain.FileMapping;
 ///
 /// Design notes:
 /// - All methods are pure (no I/O, no filesystem access).
-/// - Shared by the native handbrake runner today; normalize and promote native
-///   implementations can reuse these mappings when they're implemented.
+/// - Shared by native step runners (handbrake and promote).
 /// - The output extension is always .mp4 for handbrake (the script is handbrake_mp4).
 /// - Path.GetFullPath() is NOT used here because these methods operate on arbitrary
 ///   root combinations; callers are expected to pass pre-validated, normalized paths.
@@ -50,7 +49,7 @@ public static class VideoPathMapper
 
     /// <summary>
     /// Maps a staging file path to its expected library output path.
-    /// Used by the promote step when it gains a native implementation.
+    /// Used by the native promote step.
     ///
     /// Example:
     ///   input:       /staging/movies/Alien.mp4

@@ -245,8 +245,17 @@ public class PipelineCommandHandler(
                     "🖥️ mt pipeline: Step 3/3 — promote STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
+            var promoteManifest = manifest;
+            void OnPromoteProgress(StepFileProgress fp)
+            {
+                promoteManifest = promoteManifest.WithStepFileProgress("promote", fp);
+                manifest = promoteManifest;
+                manifests.Write(promoteManifest);
+            }
+
             using var promoteLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["promote"]);
-            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, promoteLog, ct);
+            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts,
+                onProgress: OnPromoteProgress, log: promoteLog, ct);
             manifest = manifest.WithStep("promote", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 

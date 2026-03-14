@@ -56,16 +56,16 @@ public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier disc
             DryRun:         options.DryRun //Expected false due to earlier confirmation
         );
 
-        var title = "🖥️ mt CLI: Invoking `promote` script runner";
+        var title = "🖥️ mt CLI: Invoking `promote` native runner";
         var message =   $"""
-                        Invoking script runner for **runId {runId}**
+                        Invoking native runner for **runId {runId}**
                         Target: {options.Target}, Kind: {validated.Kind}, Mode: {validated.Mode}
-                        Will Execute:
+                        Equivalent CLI args:
                         `promote {scriptArgs}`
                         """;
         await discord.NotifyAsync(title, message, null, ct);
 
-        return await promote.RunAsync(options.Target, run, scriptOptions, log, ct);
+        return await promote.RunAsync(options.Target, run, scriptOptions, onProgress: null, log, ct);
     }
 
     // internal for unit testability.

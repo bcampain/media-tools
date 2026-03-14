@@ -14,7 +14,7 @@ public record StepRecord
     /// <summary>
     /// Per-file progress detail populated by steps that process multiple files
     /// (e.g. native handbrake encoding). Null for steps that don't track files
-    /// individually (e.g. script-based normalize/promote). When present,
+    /// individually (e.g. standalone runs of handbrake/normalize/promote). When present,
     /// the dashboard renders a progress bar and per-file status list.
     /// </summary>
     public          StepFileProgress? FileProgress { get; init; }
