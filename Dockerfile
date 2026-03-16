@@ -24,6 +24,14 @@ RUN apt-get update && \
       ffmpeg \
       handbrake-cli \
       mediainfo \
+      software-properties-common \
+    && add-apt-repository -y ppa:kobuk-team/intel-graphics \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+      intel-media-va-driver-non-free \
+      libmfx-gen1 \
+      libvpl2 \
+      vainfo \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy bash scripts
