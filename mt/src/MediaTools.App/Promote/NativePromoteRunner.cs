@@ -23,7 +23,7 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
         CancellationToken         ct)
     {
         var kindSegment = run.Kind.ToString().ToLowerInvariant();
-        var archiveBase = Path.Combine(run.StagingRoot, "archive", kindSegment);
+        var archiveBase = Path.Combine(run.LibraryRoot, "archive", kindSegment);
         var incomingBase = Path.Combine(run.IncomingRoot, kindSegment);
         var targetIsFile = File.Exists(target);
         var targetIsDir = Directory.Exists(target);

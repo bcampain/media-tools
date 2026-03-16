@@ -106,8 +106,8 @@ RUN_ID is used in the existing scripts workflow. Make that the spine of the pipe
 - Promote archives under (per-kind):
 
 ```
-  TV:            /staging/archive/tv/<Show Name>/_archived-<RunId>/
-  Movies/Clips:  /staging/archive/<kind>/_archived-<RunId>/
+  TV:            /library/archive/tv/<Show Name>/_archived-<RunId>/
+  Movies/Clips:  /library/archive/<kind>/_archived-<RunId>/
 ```
 
 ## Architecture (modular + swappable, script-centered)
@@ -193,7 +193,7 @@ For single-file movie/clip targets, normalize and promote receive the staging **
 - same pattern
 - current script design details:
   - moves processed outputs to `/library`
-  - archives originals to `/staging/archive/<kind>/...`; logs stay in `/logs/`
+  - archives originals to `/library/archive/<kind>/...`; logs stay in `/logs/`
   - cleanup differs by kind:
     - **TV:** `rm -rf` the entire incoming show folder, then `rm -rf` the entire staging show root
     - **Movies/Clips:** deletes per-file originals individually; removes only empty subdirectories; never touches the staging or incoming base directories
