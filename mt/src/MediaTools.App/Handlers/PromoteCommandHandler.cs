@@ -53,7 +53,8 @@ public class PromoteCommandHandler(IPromoteRunner promote, IDiscordNotifier disc
         var scriptOptions = new PromoteScriptOptions(
             RetentionDays:  options.RetentionDays,
             Overwrite:      options.Overwrite,
-            DryRun:         options.DryRun //Expected false due to earlier confirmation
+            DryRun:         options.DryRun, //Expected false due to earlier confirmation
+            ArchiveRoot:    options.ArchiveRoot
         );
 
         var title = "🖥️ mt CLI: Invoking `promote` native runner";

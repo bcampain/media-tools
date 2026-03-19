@@ -1,7 +1,8 @@
 namespace MediaTools.Scripts;
 
 public record PromoteScriptOptions(
-    int  RetentionDays,
-    bool Overwrite,
-    bool DryRun
+    int    RetentionDays,
+    bool   Overwrite,
+    bool   DryRun,
+    string ArchiveRoot
 );

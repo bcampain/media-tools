@@ -23,6 +23,11 @@ public static class CommonOptions
         () => "/library",
         "Root directory for the media library");
 
+    public static readonly Option<string> ArchiveRoot = new(
+        "--archive-root",
+        () => "/archive",
+        "Root directory for staging archives (sibling of --library-root)");
+
     public static readonly Option<string?> RunId = new(
         "--run-id",
         () => null,

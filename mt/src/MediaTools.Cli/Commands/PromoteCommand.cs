@@ -26,6 +26,7 @@ public static class PromoteCommand
         cmd.AddOption(CommonOptions.IncomingRoot);
         cmd.AddOption(CommonOptions.StagingRoot);
         cmd.AddOption(CommonOptions.LibraryRoot);
+        cmd.AddOption(CommonOptions.ArchiveRoot);
         cmd.AddOption(CommonOptions.RunId);
         cmd.AddOption(CommonOptions.DryRun);
         cmd.AddOption(CommonOptions.Yes);
@@ -42,6 +43,7 @@ public static class PromoteCommand
                 IncomingRoot:  context.ParseResult.GetValueForOption(CommonOptions.IncomingRoot)!,
                 StagingRoot:   context.ParseResult.GetValueForOption(CommonOptions.StagingRoot)!,
                 LibraryRoot:   context.ParseResult.GetValueForOption(CommonOptions.LibraryRoot)!,
+                ArchiveRoot:   context.ParseResult.GetValueForOption(CommonOptions.ArchiveRoot)!,
                 RunId:         context.ParseResult.GetValueForOption(CommonOptions.RunId),
                 DryRun:        context.ParseResult.GetValueForOption(CommonOptions.DryRun),
                 Yes:           context.ParseResult.GetValueForOption(CommonOptions.Yes),

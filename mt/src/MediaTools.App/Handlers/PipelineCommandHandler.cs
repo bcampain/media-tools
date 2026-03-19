@@ -27,8 +27,10 @@ public class PipelineCommandHandler(
         TargetI: "-16", TruePeak: "-1.5", Lra: "11", StereoTrack: "on",
         OnePass: false, Force: false, DryRun: false);
 
+    // ArchiveRoot mirrors the default in CommonOptions.ArchiveRoot ("/archive").
+    // It is not wired through PipelineOptions because archive is a promote-only concern.
     private static readonly PromoteScriptOptions DefaultPromoteOpts = new(
-        RetentionDays: 30, Overwrite: false, DryRun: false);
+        RetentionDays: 30, Overwrite: false, DryRun: false, ArchiveRoot: "/archive");
 
     public async Task<int> HandleAsync(PipelineOptions options, CancellationToken ct)
     {

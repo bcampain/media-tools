@@ -18,5 +18,6 @@ services:
       - /srv/media/staging:/staging
       - /srv/media/library:/library
       - /srv/media/logs:/logs
+      - /srv/media/archive:/archive
     working_dir: /work
     tty: true
