@@ -4,8 +4,8 @@ namespace MediaTools.App.FileSystem;
 
 /// <summary>
 /// Discovers video files under a root path up to a configurable depth.
-/// Shared by the native Handbrake runner today; normalize and promote native
-/// implementations will reuse this when they're built.
+/// Shared by the native Handbrake runner; normalize/promote can reuse this
+/// helper when needed.
 ///
 /// Design notes:
 /// - Files are returned sorted (by full path) so processing order is deterministic

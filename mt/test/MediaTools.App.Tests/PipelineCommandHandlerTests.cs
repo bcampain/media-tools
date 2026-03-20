@@ -42,7 +42,8 @@ public class PipelineCommandHandlerTests
 
     private class NullPromoteRunner : IPromoteRunner
     {
-        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options, ILogSink log, CancellationToken ct)
+        public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options,
+                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
             => Task.FromResult(0);
     }
 
@@ -101,6 +102,8 @@ public class PipelineCommandHandlerTests
         new NullDiscordNotifier(),
         writer);
 
+    // LogDir uses the system temp directory so TeeLogSink can create log files
+    // without depending on /logs existing on the development machine.
     private static PipelineOptions OptionsFor(string target, bool dryRun = true) =>
         new(
             Target:       target,
@@ -110,7 +113,7 @@ public class PipelineCommandHandlerTests
             RunId:        "030526143000",
             DryRun:       dryRun,
             Yes:          false,
-            LogDir:       "/logs",
+            LogDir:       Path.GetTempPath(),
             Json:         false,
             Verbosity:    "normal",
             StopOnError:  true,

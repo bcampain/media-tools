@@ -6,11 +6,18 @@ services:
     environment:
       - TZ=America/Chicago
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+      - LIBVA_DRIVER_NAME=iHD
+      - HANDBRAKE_USE_QSV=true
     user: "${PUID}:${PGID}"
+    group_add:
+      - "993"        # render group — required for /dev/dri/renderD128 access
+    devices:
+      - /dev/dri:/dev/dri
     volumes:
       - /srv/media/incoming:/incoming
       - /srv/media/staging:/staging
       - /srv/media/library:/library
       - /srv/media/logs:/logs
+      - /srv/media/archive:/archive
     working_dir: /work
     tty: true

@@ -286,14 +286,28 @@ public class NativeHandbrakeRunner(
     private static string BuildHandBrakeArgs(
         string inputPath, string outputPath, HandbrakeScriptOptions options)
     {
+        // When HANDBRAKE_USE_QSV=true (set in compose.yml), use Intel Quick Sync Video
+        // hardware encoding instead of software x265. QSV offloads encode to the iGPU,
+        // dramatically reducing CPU usage and wall-clock time.
+        //
+        // Note: QSV uses different preset names (quality/balanced/speed) than x265
+        // (fast/medium/slow/etc.), so we always use "balanced" when hardware is active
+        // rather than forwarding options.Preset, which would be an invalid QSV preset name.
+        var useQsv = string.Equals(
+            Environment.GetEnvironmentVariable("HANDBRAKE_USE_QSV"),
+            "true", StringComparison.OrdinalIgnoreCase);
+
+        var encoder = useQsv ? "qsv_h265" : "x265";
+        var preset  = useQsv ? "balanced"  : options.Preset;
+
         var parts = new List<string>
         {
             "-i", Quote(inputPath),
             "-o", Quote(outputPath),
             "--format",          "av_mp4",
-            "--encoder",         "x265",
+            "--encoder",         encoder,
             "--quality",         options.Quality.ToString(),
-            "--encoder-preset",  options.Preset,
+            "--encoder-preset",  preset,
             // Audio: copy the most common lossy formats; fall back to AAC for anything else
             "--audio-copy-mask", "aac,ac3,eac3,truehd,dtshd,dts,mp3",
             "--audio-fallback",  "av_aac",

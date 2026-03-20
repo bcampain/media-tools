@@ -5,6 +5,7 @@ public record PromoteOptions(
     string  IncomingRoot,
     string  StagingRoot,
     string  LibraryRoot,
+    string  ArchiveRoot,
     string? RunId,
     bool    DryRun,
     bool    Yes,

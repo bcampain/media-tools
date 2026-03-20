@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MediaTools.App.FileSystem;
 using MediaTools.App.Handbrake;
 using MediaTools.App.Normalize;
+using MediaTools.App.Promote;
 using MediaTools.App.Handlers;
 using MediaTools.Infrastructure.Logging;
 using MediaTools.Infrastructure.Manifests;
@@ -41,14 +42,10 @@ services.AddSingleton<IManifestWriter>(new ManifestWriter(runsDir));
 // VideoFileScanner is stateless; a singleton is safe and avoids allocation overhead.
 services.AddSingleton<VideoFileScanner>();
 
-// NativeHandbrakeRunner replaces the old HandbrakeRunner script caller.
-// It uses HandBrakeCLI directly and reports per-file progress to the manifest
-// so the mt-dashboard can render a live progress bar.
+// Native runners for all tasks
 services.AddSingleton<IHandbrakeRunner, NativeHandbrakeRunner>();
 services.AddSingleton<INormalizeRunner, NativeNormalizeRunner>();
-
-// "Promote" still delegates to its shell script
-services.AddSingleton<IPromoteRunner,   PromoteRunner>();
+services.AddSingleton<IPromoteRunner,   NativePromoteRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL")))
     Console.Error.WriteLine("[WARN] DISCORD_WEBHOOK_URL is not set — Discord notifications are disabled");

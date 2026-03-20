@@ -27,8 +27,10 @@ public class PipelineCommandHandler(
         TargetI: "-16", TruePeak: "-1.5", Lra: "11", StereoTrack: "on",
         OnePass: false, Force: false, DryRun: false);
 
+    // ArchiveRoot mirrors the default in CommonOptions.ArchiveRoot ("/archive").
+    // It is not wired through PipelineOptions because archive is a promote-only concern.
     private static readonly PromoteScriptOptions DefaultPromoteOpts = new(
-        RetentionDays: 30, Overwrite: false, DryRun: false);
+        RetentionDays: 30, Overwrite: false, DryRun: false, ArchiveRoot: "/archive");
 
     public async Task<int> HandleAsync(PipelineOptions options, CancellationToken ct)
     {
@@ -245,8 +247,17 @@ public class PipelineCommandHandler(
                     "🖥️ mt pipeline: Step 3/3 — promote STARTED",
                     $"RunId {runId}\nTarget: {stagingTarget}", null, ct);
 
+            var promoteManifest = manifest;
+            void OnPromoteProgress(StepFileProgress fp)
+            {
+                promoteManifest = promoteManifest.WithStepFileProgress("promote", fp);
+                manifest = promoteManifest;
+                manifests.Write(promoteManifest);
+            }
+
             using var promoteLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["promote"]);
-            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts, promoteLog, ct);
+            var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts,
+                onProgress: OnPromoteProgress, log: promoteLog, ct);
             manifest = manifest.WithStep("promote", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 
