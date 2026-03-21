@@ -86,6 +86,29 @@ public record PipelineRunManifest
     public PipelineRunManifest WithCancelledRunningSteps(DateTime at) =>
         this with
         {
-            Steps = Steps.Select(s => s.Status == StepStatus.Running ? s.AsCancelled(at) : s).ToList()
+            Steps = Steps.Select(s =>
+            {
+                if (s.Status != StepStatus.Running) return s;
+
+                var cancelled = s.AsCancelled(at);
+
+                // If the step tracked per-file progress, cancel any file that was
+                // mid-process so the dashboard doesn't show it stuck as "running".
+                if (cancelled.FileProgress?.Files is { } files)
+                {
+                    var updatedFiles = files
+                        .Select(f => f.Status == StepStatus.Running
+                            ? f with { Status = StepStatus.Cancelled, CompletedAt = at }
+                            : f)
+                        .ToList();
+
+                    cancelled = cancelled with
+                    {
+                        FileProgress = cancelled.FileProgress with { Files = updatedFiles }
+                    };
+                }
+
+                return cancelled;
+            }).ToList()
         };
 }
