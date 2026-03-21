@@ -132,9 +132,17 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         log.Info($"[normalize] Found {inputFiles.Count} file(s) to normalize.");
 
         // ── Build the job list ────────────────────────────────────────────────
-        // Files present in inheritedFiles were completed in a prior run and are
-        // pre-marked as Inherited so they are skipped without re-normalizing.
-        var jobs = inputFiles
+        // A completed normalize job deletes its .norm.mp4, so inherited files
+        // from a prior run won't appear in the discovery scan.  Union them back
+        // in and sort the combined set before projecting to job records.
+        var allPaths = inheritedFiles is null
+            ? inputFiles
+            : inputFiles
+                .Concat(inheritedFiles.Except(inputFiles, StringComparer.Ordinal))
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .ToList();
+
+        var jobs = allPaths
             .Select(f => new FileJobRecord
             {
                 InputPath  = f,
@@ -144,25 +152,6 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
                                  : StepStatus.Pending
             })
             .ToList();
-
-        // A completed normalize job deletes its .norm.mp4 source, so inherited
-        // files whose prior run finished won't appear in the on-disk discovery
-        // scan above.  Synthesise Inherited records for them so the dashboard
-        // shows the full file set and the counts are correct.
-        if (inheritedFiles is not null)
-        {
-            var discoveredPaths = new HashSet<string>(inputFiles, StringComparer.Ordinal);
-            foreach (var inherited in inheritedFiles.OrderBy(p => p, StringComparer.Ordinal))
-            {
-                if (!discoveredPaths.Contains(inherited))
-                    jobs.Add(new FileJobRecord
-                    {
-                        InputPath  = inherited,
-                        OutputPath = NormMp4ToMp4(inherited),
-                        Status     = StepStatus.Inherited
-                    });
-            }
-        }
 
         var inheritedCount = jobs.Count(j => j.Status == StepStatus.Inherited);
         if (inheritedCount > 0)
