@@ -160,7 +160,13 @@ public class NativeHandbrakeRunner(
             if (rc == 0)
             {
                 log.Info($"[handbrake]   ✓ Done: {Path.GetFileName(job.OutputPath)}");
-                
+
+                // Update status and persist to manifest before notifying Discord.
+                // This ensures the run state is always accurate even if the notification fails.
+                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = completedAt, ExitCode = 0 };
+                createdCount++;
+                ReportProgress(onProgress, jobs, currentFile: null);
+
                 var createdTitle = $"☑️ HandBrake: Created output mp4 ({i + 1}/{jobs.Count})";
                 var createdMessage = $"""
                                Target: {target} | run_id: {run.RunId}
@@ -168,9 +174,6 @@ public class NativeHandbrakeRunner(
                                Original: {Path.GetFileName(job.InputPath)}
                                """;
                 await discord.NotifyAsync(createdTitle, createdMessage, null, ct);
-
-                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = completedAt, ExitCode = 0 };
-                createdCount++;
             }
             else
             {
@@ -179,16 +182,16 @@ public class NativeHandbrakeRunner(
                 // Remove partial output to avoid leaving a corrupt file in staging
                 TryDeletePartialOutput(job.OutputPath, log);
 
+                // Update status and persist before notifying Discord (same reason as above).
+                jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = rc };
+                failedCount++;
+                ReportProgress(onProgress, jobs, currentFile: null);
+
                 await discord.NotifyAsync(
                     $"❌ HandBrake: Failed to process file ({i + 1}/{jobs.Count})",
                     $"Target: {target} | run_id={run.RunId}\nFailed file: {fileName}",
                     run.LogFile, ct);
-
-                jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = rc };
-                failedCount++;
             }
-
-            ReportProgress(onProgress, jobs, currentFile: null);
         }
 
         log.Info($"[handbrake] Complete: {createdCount + skippedCount}/{jobs.Count} succeeded" +
