@@ -74,8 +74,16 @@ public class RunResumeService(string runsDirectory) : IRunResumeService
         if (step?.FileProgress?.Files is null)
             return ImmutableEmptySet;
 
+        // Inherit any file that was definitively finished in the prior run:
+        //   Complete  — successfully processed
+        //   Skipped   — output already existed; no re-processing needed
+        //   Inherited — carried forward from an even earlier run
+        // Files that are Failed, Cancelled, Pending, or Running are left out
+        // so they get reprocessed in the new run.
         return step.FileProgress.Files
-            .Where(f => f.Status == StepStatus.Complete)
+            .Where(f => f.Status is StepStatus.Complete
+                                 or StepStatus.Skipped
+                                 or StepStatus.Inherited)
             .Select(f => f.InputPath)
             .ToHashSet(StringComparer.Ordinal);
     }
