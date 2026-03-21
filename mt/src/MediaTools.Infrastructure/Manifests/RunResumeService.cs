@@ -87,7 +87,8 @@ public class RunResumeService(string runsDirectory) : IRunResumeService
         if (!Directory.Exists(runsDirectory))
             yield break;
 
-        foreach (var file in Directory.EnumerateFiles(runsDirectory, "*.json"))
+        foreach (var file in Directory.EnumerateFiles(runsDirectory, "*.json")
+                     .Where(f => !Path.GetFileName(f).StartsWith("._", StringComparison.Ordinal)))
         {
             PipelineRunManifest? m = null;
             try
