@@ -54,7 +54,7 @@ public record PipelineRunManifest
     public required string          Target             { get; init; }
     public required string          StagingTarget      { get; init; }
     public required string          LogFile            { get; init; }
-    public required Dictionary<string, string> StepLogFiles { get; init; }
+    public          Dictionary<string, string> StepLogFiles { get; init; } = new();
     public required RunStatus       Status             { get; init; }
     public          int?            ExitCode           { get; init; }
     public          bool            DryRun             { get; init; }
