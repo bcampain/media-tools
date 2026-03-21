@@ -145,6 +145,25 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
             })
             .ToList();
 
+        // A completed normalize job deletes its .norm.mp4 source, so inherited
+        // files whose prior run finished won't appear in the on-disk discovery
+        // scan above.  Synthesise Inherited records for them so the dashboard
+        // shows the full file set and the counts are correct.
+        if (inheritedFiles is not null)
+        {
+            var discoveredPaths = new HashSet<string>(inputFiles, StringComparer.Ordinal);
+            foreach (var inherited in inheritedFiles.OrderBy(p => p, StringComparer.Ordinal))
+            {
+                if (!discoveredPaths.Contains(inherited))
+                    jobs.Add(new FileJobRecord
+                    {
+                        InputPath  = inherited,
+                        OutputPath = NormMp4ToMp4(inherited),
+                        Status     = StepStatus.Inherited
+                    });
+            }
+        }
+
         var inheritedCount = jobs.Count(j => j.Status == StepStatus.Inherited);
         if (inheritedCount > 0)
             log.Info($"[normalize] {inheritedCount} file(s) inherited from prior run — skipping re-normalize.");
