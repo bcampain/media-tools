@@ -302,28 +302,33 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
                 var passLabel = options.OnePass ? "1pass" : "2pass";
                 log.Info($"[normalize]   ✓ NORMALIZED({passLabel}) + DELETED .norm [{i + 1}/{jobs.Count}]: " +
                          $"{fileName} → {Path.GetFileName(job.OutputPath)}");
+
+                // Update status and persist before notifying Discord so state is
+                // accurate even if the notification fails.
+                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = completedAt, ExitCode = 0 };
+                createdCount++;
+                ReportProgress(onProgress, jobs, currentFile: null);
+
                 await discord.NotifyAsync(
                     $"☑️ ffmpeg: Normalized audio ({i + 1}/{jobs.Count})",
                     $"NORMALIZED({passLabel}): {Path.GetFileName(job.OutputPath)}\nDELETED: {fileName}",
                     null, ct);
-
-                jobs[i] = jobs[i] with { Status = StepStatus.Complete, CompletedAt = completedAt, ExitCode = 0 };
-                createdCount++;
             }
             else
             {
                 log.Error($"[normalize]   ✗ FAILED (exit {rc}): {fileName}");
                 TryDeleteTemp(tmpFile, log);
+
+                // Same reason — persist state before Discord.
+                jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = rc };
+                failedCount++;
+                ReportProgress(onProgress, jobs, currentFile: null);
+
                 await discord.NotifyAsync(
                     $"❌ ffmpeg: Failed to normalize audio ({i + 1}/{jobs.Count})",
                     $"Target: {target} | run_id={run.RunId}\nFailed file: {fileName}",
                     run.LogFile, ct);
-
-                jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = completedAt, ExitCode = rc };
-                failedCount++;
             }
-
-            ReportProgress(onProgress, jobs, currentFile: null);
         }
 
         log.Info($"[normalize] Complete: {createdCount + skippedCount}/{jobs.Count} succeeded" +

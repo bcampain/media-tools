@@ -29,8 +29,20 @@ public class DiscordNotifier(HttpClient http, ILogSink log) : IDiscordNotifier
         var body    = new StringContent(payload, Encoding.UTF8, "application/json");
 
         // Dispose the response to release the underlying connection back to the pool.
-        using var response = await http.PostAsync(_webhookUrl, body, ct);
+        // HttpRequestException covers transient failures (dropped connection, DNS, timeout).
+        // These are non-fatal — Discord notifications should never crash the pipeline.
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.PostAsync(_webhookUrl, body, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            log.Warn($"[discord-notify] Failed to post to webhook: {ex.Message}");
+            return 1;
+        }
 
+        using var _ = response;
         log.Info($"[discord-notify] http_code={(int)response.StatusCode}");
 
         // Discord returns 204 No Content on success for most webhook endpoints.
