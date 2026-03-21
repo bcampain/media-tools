@@ -14,5 +14,7 @@ public record PipelineOptions(
     bool    StopOnError,
     bool    Notify,
     string? Step,
-    string? Until
+    string? Until,
+    bool    Resume,
+    string? ResumeFrom
 );

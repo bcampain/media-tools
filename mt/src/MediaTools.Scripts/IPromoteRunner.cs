@@ -11,5 +11,6 @@ public interface IPromoteRunner
         PromoteScriptOptions      options,
         Action<StepFileProgress>? onProgress,
         ILogSink                  log,
-        CancellationToken         ct);
+        CancellationToken         ct,
+        IReadOnlySet<string>?     inheritedFiles = null);
 }

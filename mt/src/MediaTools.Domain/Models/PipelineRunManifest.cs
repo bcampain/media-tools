@@ -46,20 +46,21 @@ public record StepRecord
 /// </summary>
 public record PipelineRunManifest
 {
-    public required string          RunId         { get; init; }
-    public required DateTime        StartedAt     { get; init; }
-    public          DateTime?       CompletedAt   { get; init; }
-    public required string          Kind          { get; init; }  // "tv" | "movies" | "clips"
-    public required string          TargetMode    { get; init; }  // "dir" | "file"
-    public required string          Target        { get; init; }
-    public required string          StagingTarget { get; init; }
-    public required string          LogFile       { get; init; }
+    public required string          RunId              { get; init; }
+    public required DateTime        StartedAt          { get; init; }
+    public          DateTime?       CompletedAt        { get; init; }
+    public required string          Kind               { get; init; }  // "tv" | "movies" | "clips"
+    public required string          TargetMode         { get; init; }  // "dir" | "file"
+    public required string          Target             { get; init; }
+    public required string          StagingTarget      { get; init; }
+    public required string          LogFile            { get; init; }
     public required Dictionary<string, string> StepLogFiles { get; init; }
-    public required RunStatus       Status        { get; init; }
-    public          int?            ExitCode      { get; init; }
-    public          bool            DryRun        { get; init; }
-    public required List<string>    StepsPlanned  { get; init; }
-    public required List<StepRecord> Steps        { get; init; }
+    public required RunStatus       Status             { get; init; }
+    public          int?            ExitCode           { get; init; }
+    public          bool            DryRun             { get; init; }
+    public required List<string>    StepsPlanned       { get; init; }
+    public required List<StepRecord> Steps             { get; init; }
+    public          string?         ResumedFromRunId   { get; init; }
 
     /// <summary>Returns a copy with the top-level status (and optionally ExitCode/CompletedAt) updated.</summary>
     public PipelineRunManifest WithStatus(RunStatus status, int? exitCode = null, DateTime? completedAt = null) =>

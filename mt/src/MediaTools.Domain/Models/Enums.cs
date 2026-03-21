@@ -51,5 +51,6 @@ public enum StepStatus
     Complete,
     Failed,
     Cancelled,
-    Skipped
+    Skipped,
+    Inherited
 }

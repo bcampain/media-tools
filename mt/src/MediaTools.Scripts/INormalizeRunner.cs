@@ -11,5 +11,6 @@ public interface INormalizeRunner
         NormalizeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
         ILogSink                  log,
-        CancellationToken         ct);
+        CancellationToken         ct,
+        IReadOnlySet<string>?     inheritedFiles = null);
 }

@@ -38,6 +38,10 @@ services.AddSingleton<HttpClient>();
 var runsDir = Path.Combine("/logs", "runs");
 services.AddSingleton<IManifestWriter>(new ManifestWriter(runsDir));
 
+// RunResumeService — scans the runs directory to find a prior failed/cancelled run
+// for the same target when --resume or --resume-from is passed.
+services.AddSingleton<IRunResumeService>(new RunResumeService(runsDir));
+
 // Shared file-system utilities used by native step runners.
 // VideoFileScanner is stateless; a singleton is safe and avoids allocation overhead.
 services.AddSingleton<VideoFileScanner>();

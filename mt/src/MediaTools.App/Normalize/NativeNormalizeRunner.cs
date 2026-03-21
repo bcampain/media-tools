@@ -85,7 +85,8 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         NormalizeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
         ILogSink                  log,
-        CancellationToken         ct)
+        CancellationToken         ct,
+        IReadOnlySet<string>?     inheritedFiles = null)
     {
         var ffmpegPath  = _ffmpegPath.Value;
         var ffprobePath = _ffprobePath.Value;
@@ -131,14 +132,22 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         log.Info($"[normalize] Found {inputFiles.Count} file(s) to normalize.");
 
         // ── Build the job list ────────────────────────────────────────────────
+        // Files present in inheritedFiles were completed in a prior run and are
+        // pre-marked as Inherited so they are skipped without re-normalizing.
         var jobs = inputFiles
             .Select(f => new FileJobRecord
             {
                 InputPath  = f,
                 OutputPath = NormMp4ToMp4(f),
-                Status     = StepStatus.Pending
+                Status     = inheritedFiles?.Contains(f) == true
+                                 ? StepStatus.Inherited
+                                 : StepStatus.Pending
             })
             .ToList();
+
+        var inheritedCount = jobs.Count(j => j.Status == StepStatus.Inherited);
+        if (inheritedCount > 0)
+            log.Info($"[normalize] {inheritedCount} file(s) inherited from prior run — skipping re-normalize.");
 
         // Emit initial progress so the dashboard shows the total file count immediately.
         ReportProgress(onProgress, jobs, currentFile: null);
@@ -158,6 +167,14 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
 
             var job      = jobs[i];
             var fileName = Path.GetFileName(job.InputPath);
+
+            // Skip files inherited from a prior run
+            if (job.Status == StepStatus.Inherited)
+            {
+                log.Info($"[normalize] [{i + 1}/{jobs.Count}] {fileName} (inherited — skipped)");
+                continue;
+            }
+
             log.Info($"[normalize] [{i + 1}/{jobs.Count}] {fileName}");
             log.Info($"[normalize]   input:  {job.InputPath}");
             log.Info($"[normalize]   output: {job.OutputPath}");
@@ -331,8 +348,9 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
             }
         }
 
-        log.Info($"[normalize] Complete: {createdCount + skippedCount}/{jobs.Count} succeeded" +
-                 (failedCount > 0 ? $", {failedCount} failed" : ""));
+        log.Info($"[normalize] Complete: {createdCount + skippedCount}/{jobs.Count - inheritedCount} succeeded" +
+                 (failedCount > 0  ? $", {failedCount} failed"   : "") +
+                 (inheritedCount > 0 ? $", {inheritedCount} inherited" : ""));
 
         var completeMessage = $"Target: {target} | run_id={run.RunId} | " +
                               $"normalized={createdCount} skipped={skippedCount} failed={failedCount}";
@@ -830,11 +848,13 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         var processed = 0;
         var failed    = 0;
         var skipped   = 0;
+        var inherited = 0;
         foreach (var j in jobs)
         {
-            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped) processed++;
-            if (j.Status == StepStatus.Failed)  failed++;
-            if (j.Status == StepStatus.Skipped) skipped++;
+            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped or StepStatus.Inherited) processed++;
+            if (j.Status == StepStatus.Failed)    failed++;
+            if (j.Status == StepStatus.Skipped)   skipped++;
+            if (j.Status == StepStatus.Inherited) inherited++;
         }
 
         onProgress(new StepFileProgress
@@ -843,6 +863,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
             ProcessedFiles = processed,
             FailedFiles    = failed,
             SkippedFiles   = skipped,
+            InheritedFiles = inherited,
             CurrentFile    = currentFile,
             Files          = jobs.AsReadOnly()
         });

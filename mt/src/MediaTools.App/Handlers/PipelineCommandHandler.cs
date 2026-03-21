@@ -16,7 +16,8 @@ public class PipelineCommandHandler(
     INormalizeRunner  normalize,
     IPromoteRunner    promote,
     IDiscordNotifier  discord,
-    IManifestWriter   manifests)
+    IManifestWriter   manifests,
+    IRunResumeService resumeService)
 {
     // Default script options used by the pipeline. For custom quality / encoding
     // settings, run the individual commands (e.g. `mt handbrake`) directly.
@@ -55,6 +56,31 @@ public class PipelineCommandHandler(
         // until handbrake has run.
         var stagingTarget = TargetValidator.DeriveHandoffTarget(
             validated, options.IncomingRoot, options.StagingRoot);
+
+        // ── Resume: resolve prior run to inherit from ─────────────────────────
+        PipelineRunManifest? priorRun = null;
+
+        if (!string.IsNullOrEmpty(options.ResumeFrom))
+        {
+            priorRun = resumeService.LoadCandidate(options.ResumeFrom, out var reason);
+            if (priorRun is null)
+            {
+                pipelineLog.Error($"[pipeline] Cannot resume from run '{options.ResumeFrom}': {reason}");
+                return HandlerHelpers.ValidationExitCode;
+            }
+            pipelineLog.Info($"[pipeline] Resuming from run: {priorRun.RunId} (status: {priorRun.Status})");
+        }
+        else if (options.Resume)
+        {
+            priorRun = resumeService.FindCandidate(options.Target);
+            if (priorRun is null)
+            {
+                pipelineLog.Error($"[pipeline] --resume was passed but no failed or cancelled run was found for target: {options.Target}");
+                pipelineLog.Error("[pipeline] If the prior run completed successfully, start a new run without --resume.");
+                return HandlerHelpers.ValidationExitCode;
+            }
+            pipelineLog.Info($"[pipeline] Auto-detected resume candidate: {priorRun.RunId} (status: {priorRun.Status})");
+        }
 
         // Enum range comparisons work because PipelineStep is ordered:
         //   Handbrake=0, NormalizeAudio=1, Promote=2.
@@ -116,25 +142,26 @@ public class PipelineCommandHandler(
 
         var manifest = new PipelineRunManifest
         {
-            RunId         = runId,
-            StartedAt     = run.StartedAt,
-            Kind          = validated.Kind.ToString().ToLowerInvariant(),
-            TargetMode    = validated.Mode.ToString().ToLowerInvariant(),
-            Target        = options.Target,
-            StagingTarget = stagingTarget,
-            LogFile       = run.LogFile,
-            StepLogFiles      = stepLogFiles,
-            Status        = RunStatus.Running,
-            DryRun        = false,
-            StepsPlanned  = stepsPlanned,
-            Steps         = stepsPlanned
-                                .Select(s => new StepRecord
-                                {
-                                    Name    = s,
-                                    Status  = StepStatus.Pending,
-                                    LogFile = stepLogFiles[s]
-                                })
-                                .ToList()
+            RunId            = runId,
+            StartedAt        = run.StartedAt,
+            Kind             = validated.Kind.ToString().ToLowerInvariant(),
+            TargetMode       = validated.Mode.ToString().ToLowerInvariant(),
+            Target           = options.Target,
+            StagingTarget    = stagingTarget,
+            LogFile          = run.LogFile,
+            StepLogFiles     = stepLogFiles,
+            Status           = RunStatus.Running,
+            DryRun           = false,
+            StepsPlanned     = stepsPlanned,
+            ResumedFromRunId = priorRun?.RunId,
+            Steps            = stepsPlanned
+                                   .Select(s => new StepRecord
+                                   {
+                                       Name    = s,
+                                       Status  = StepStatus.Pending,
+                                       LogFile = stepLogFiles[s]
+                                   })
+                                   .ToList()
         };
         manifests.Write(manifest);
 
@@ -168,8 +195,12 @@ public class PipelineCommandHandler(
             }
 
             using var handbrakeLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["handbrake"]);
+            var handbrakeInherited = priorRun is not null
+                ? resumeService.GetInheritedInputPaths(priorRun, "handbrake")
+                : null;
             var rc = await handbrake.RunAsync(options.Target, run, DefaultHandbrakeOpts,
-                onProgress: OnHandbrakeProgress, log: handbrakeLog, ct);
+                onProgress: OnHandbrakeProgress, log: handbrakeLog, ct,
+                inheritedFiles: handbrakeInherited);
 
             manifest = manifest.WithStep("handbrake", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
@@ -212,8 +243,12 @@ public class PipelineCommandHandler(
             }
 
             using var normalizeLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["normalize"]);
+            var normalizeInherited = priorRun is not null
+                ? resumeService.GetInheritedInputPaths(priorRun, "normalize")
+                : null;
             var rc = await normalize.RunAsync(stagingTarget, run, DefaultNormalizeOpts,
-                onProgress: OnNormalizeProgress, log: normalizeLog, ct);
+                onProgress: OnNormalizeProgress, log: normalizeLog, ct,
+                inheritedFiles: normalizeInherited);
 
             // manifest is already up-to-date via OnNormalizeProgress; stamp the step result
             manifest = manifest.WithStep("normalize", s => s.AsCompleted(DateTime.UtcNow, rc));
@@ -256,8 +291,12 @@ public class PipelineCommandHandler(
             }
 
             using var promoteLog = new TeeLogSink(new ConsoleLogSink(), stepLogFiles["promote"]);
+            var promoteInherited = priorRun is not null
+                ? resumeService.GetInheritedInputPaths(priorRun, "promote")
+                : null;
             var rc = await promote.RunAsync(stagingTarget, run, DefaultPromoteOpts,
-                onProgress: OnPromoteProgress, log: promoteLog, ct);
+                onProgress: OnPromoteProgress, log: promoteLog, ct,
+                inheritedFiles: promoteInherited);
             manifest = manifest.WithStep("promote", s => s.AsCompleted(DateTime.UtcNow, rc));
             manifests.Write(manifest);
 

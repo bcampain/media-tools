@@ -29,21 +29,24 @@ public class PipelineCommandHandlerTests
     {
         public Task<int> RunAsync(
             string target, PipelineRun run, HandbrakeScriptOptions options,
-            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+            IReadOnlySet<string>? inheritedFiles = null)
             => Task.FromResult(0);
     }
 
     private class NullNormalizeRunner : INormalizeRunner
     {
         public Task<int> RunAsync(string target, PipelineRun run, NormalizeScriptOptions options,
-                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
+                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+                                  IReadOnlySet<string>? inheritedFiles = null)
             => Task.FromResult(0);
     }
 
     private class NullPromoteRunner : IPromoteRunner
     {
         public Task<int> RunAsync(string target, PipelineRun run, PromoteScriptOptions options,
-                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
+                                  Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+                                  IReadOnlySet<string>? inheritedFiles = null)
             => Task.FromResult(0);
     }
 
@@ -70,6 +73,19 @@ public class PipelineCommandHandlerTests
         public PipelineRunManifest? Last => Written.Count > 0 ? Written[^1] : null;
     }
 
+    // No-op resume service: always returns null (no prior run to inherit from).
+    private class NullRunResumeService : IRunResumeService
+    {
+        public PipelineRunManifest? FindCandidate(string target) => null;
+        public PipelineRunManifest? LoadCandidate(string runId, out string? reason)
+        {
+            reason = null;
+            return null;
+        }
+        public IReadOnlySet<string> GetInheritedInputPaths(PipelineRunManifest prior, string stepName)
+            => new HashSet<string>();
+    }
+
     // Simulates a runner being interrupted mid-execution (e.g. Ctrl+C).
     // Calls ct.ThrowIfCancellationRequested() so a pre-cancelled token causes
     // an OperationCanceledException the same way a real runner would produce it.
@@ -77,7 +93,8 @@ public class PipelineCommandHandlerTests
     {
         public Task<int> RunAsync(
             string target, PipelineRun run, HandbrakeScriptOptions options,
-            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct)
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+            IReadOnlySet<string>? inheritedFiles = null)
         {
             ct.ThrowIfCancellationRequested();
             return Task.FromResult(0);
@@ -91,7 +108,8 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        new NullManifestWriter());
+        new NullManifestWriter(),
+        new NullRunResumeService());
 
     // Overload for cancellation tests: injects a cancelling runner and a writer
     // that captures every manifest snapshot so we can assert on the final status.
@@ -100,7 +118,8 @@ public class PipelineCommandHandlerTests
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
-        writer);
+        writer,
+        new NullRunResumeService());
 
     // LogDir uses the system temp directory so TeeLogSink can create log files
     // without depending on /logs existing on the development machine.
@@ -119,7 +138,9 @@ public class PipelineCommandHandlerTests
             StopOnError:  true,
             Notify:       true,
             Step:         null,
-            Until:        null
+            Until:        null,
+            Resume:       false,
+            ResumeFrom:   null
         );
 
     // ── Validation failure tests ─────────────────────────────────────────────

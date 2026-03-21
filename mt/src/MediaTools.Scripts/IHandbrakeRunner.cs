@@ -23,5 +23,6 @@ public interface IHandbrakeRunner
         HandbrakeScriptOptions     options,
         Action<StepFileProgress>?  onProgress,
         ILogSink                   log,
-        CancellationToken          ct);
+        CancellationToken          ct,
+        IReadOnlySet<string>?      inheritedFiles = null);
 }

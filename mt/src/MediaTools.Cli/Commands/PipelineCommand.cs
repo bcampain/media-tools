@@ -26,6 +26,16 @@ public static class PipelineCommand
         () => null,
         "Stop pipeline after this step: handbrake | normalize | promote");
 
+    public static readonly Option<bool> Resume = new(
+        "--resume",
+        () => false,
+        "Auto-detect the most recent failed or cancelled run for this target and resume from it");
+
+    public static readonly Option<string?> ResumeFrom = new(
+        "--resume-from",
+        () => null,
+        "Resume from a specific prior run ID (must be failed or cancelled, not complete)");
+
     public static Command Build(PipelineCommandHandler handler)
     {
         var target = new Argument<string>(
@@ -48,6 +58,8 @@ public static class PipelineCommand
         cmd.AddOption(Notify);
         cmd.AddOption(Step);
         cmd.AddOption(Until);
+        cmd.AddOption(Resume);
+        cmd.AddOption(ResumeFrom);
 
         cmd.SetHandler(async (InvocationContext context) =>
         {
@@ -65,7 +77,9 @@ public static class PipelineCommand
                 StopOnError:  context.ParseResult.GetValueForOption(StopOnError),
                 Notify:       context.ParseResult.GetValueForOption(Notify),
                 Step:         context.ParseResult.GetValueForOption(Step),
-                Until:        context.ParseResult.GetValueForOption(Until)
+                Until:        context.ParseResult.GetValueForOption(Until),
+                Resume:       context.ParseResult.GetValueForOption(Resume),
+                ResumeFrom:   context.ParseResult.GetValueForOption(ResumeFrom)
             );
 
             context.ExitCode = await handler.HandleAsync(options, context.GetCancellationToken());

@@ -54,7 +54,8 @@ public class NativeHandbrakeRunner(
         HandbrakeScriptOptions    options,
         Action<StepFileProgress>? onProgress,
         ILogSink                  log,
-        CancellationToken         ct)
+        CancellationToken         ct,
+        IReadOnlySet<string>?     inheritedFiles = null)
     {
         var hbPath = _handBrakePath.Value;
         if (hbPath is null)
@@ -86,14 +87,22 @@ public class NativeHandbrakeRunner(
         log.Info($"[handbrake] Found {inputFiles.Count} file(s) to encode.");
 
         // ── Build the job list ────────────────────────────────────────────────
+        // Files present in inheritedFiles were completed in a prior run and are
+        // pre-marked as Inherited so they are skipped without re-encoding.
         var jobs = inputFiles
             .Select(f => new FileJobRecord
             {
                 InputPath  = f,
                 OutputPath = VideoPathMapper.MapHandbrakeOutput(f, run.IncomingRoot, run.StagingRoot),
-                Status     = StepStatus.Pending
+                Status     = inheritedFiles?.Contains(f) == true
+                                 ? StepStatus.Inherited
+                                 : StepStatus.Pending
             })
             .ToList();
+
+        var inheritedCount = jobs.Count(j => j.Status == StepStatus.Inherited);
+        if (inheritedCount > 0)
+            log.Info($"[handbrake] {inheritedCount} file(s) inherited from prior run — skipping re-encode.");
 
         // Emit initial progress so the dashboard shows total count immediately
         ReportProgress(onProgress, jobs, currentFile: null);
@@ -108,6 +117,14 @@ public class NativeHandbrakeRunner(
 
             var job = jobs[i];
             var fileName = Path.GetFileName(job.InputPath);
+
+            // Skip files that were successfully completed in the prior run
+            if (job.Status == StepStatus.Inherited)
+            {
+                log.Info($"[handbrake] [{i + 1}/{jobs.Count}] {fileName} (inherited — skipped)");
+                continue;
+            }
+
             log.Info($"[handbrake] [{i + 1}/{jobs.Count}] {fileName}");
             log.Info($"[handbrake]   input:  {job.InputPath}");
             log.Info($"[handbrake]   output: {job.OutputPath}");
@@ -194,8 +211,9 @@ public class NativeHandbrakeRunner(
             }
         }
 
-        log.Info($"[handbrake] Complete: {createdCount + skippedCount}/{jobs.Count} succeeded" +
-                 (failedCount > 0 ? $", {failedCount} failed" : ""));
+        log.Info($"[handbrake] Complete: {createdCount + skippedCount}/{jobs.Count - inheritedCount} succeeded" +
+                 (failedCount > 0  ? $", {failedCount} failed"   : "") +
+                 (inheritedCount > 0 ? $", {inheritedCount} inherited" : ""));
 
         var completeMessage = $"Target: {target} | run_id={run.RunId} | created={createdCount} skipped={skippedCount} failed={failedCount}";
         await discord.NotifyAsync("✅ Step 1 of 3: HandBrake finished", completeMessage, run.LogFile, ct);
@@ -342,11 +360,13 @@ public class NativeHandbrakeRunner(
         var processed = 0;
         var failed    = 0;
         var skipped   = 0;
+        var inherited = 0;
         foreach (var j in jobs)
         {
-            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped) processed++;
-            if (j.Status == StepStatus.Failed)  failed++;
-            if (j.Status == StepStatus.Skipped) skipped++;
+            if (j.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped or StepStatus.Inherited) processed++;
+            if (j.Status == StepStatus.Failed)   failed++;
+            if (j.Status == StepStatus.Skipped)  skipped++;
+            if (j.Status == StepStatus.Inherited) inherited++;
         }
 
         onProgress(new StepFileProgress
@@ -355,6 +375,7 @@ public class NativeHandbrakeRunner(
             ProcessedFiles = processed,
             FailedFiles    = failed,
             SkippedFiles   = skipped,
+            InheritedFiles = inherited,
             CurrentFile    = currentFile,
             // Include the full file list so the dashboard can render per-file indicators.
             // For very large sets this could be trimmed, but typical media batches are

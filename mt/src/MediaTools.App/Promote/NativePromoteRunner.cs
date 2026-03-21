@@ -20,7 +20,8 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
         PromoteScriptOptions      options,
         Action<StepFileProgress>? onProgress,
         ILogSink                  log,
-        CancellationToken         ct)
+        CancellationToken         ct,
+        IReadOnlySet<string>?     inheritedFiles = null)
     {
         var kindSegment = run.Kind.ToString().ToLowerInvariant();
         var archiveBase = Path.Combine(options.ArchiveRoot, kindSegment);
@@ -86,14 +87,22 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
             return 0;
         }
 
+        // Files present in inheritedFiles were completed in a prior run and are
+        // pre-marked as Inherited so they are skipped without re-copying.
         var jobs = inputFiles
             .Select(f => new FileJobRecord
             {
                 InputPath = f,
                 OutputPath = VideoPathMapper.MapPromoteOutput(f, run.StagingRoot, run.LibraryRoot),
-                Status = StepStatus.Pending
+                Status = inheritedFiles?.Contains(f) == true
+                             ? StepStatus.Inherited
+                             : StepStatus.Pending
             })
             .ToList();
+
+        var inheritedCount = jobs.Count(j => j.Status == StepStatus.Inherited);
+        if (inheritedCount > 0)
+            log.Info($"[promote] {inheritedCount} file(s) inherited from prior run — skipping re-copy.");
 
         ReportProgress(onProgress, jobs, currentFile: null);
 
@@ -108,6 +117,14 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
 
             var job = jobs[i];
             var fileName = Path.GetFileName(job.InputPath);
+
+            // Skip files inherited from a prior run — already in the library
+            if (job.Status == StepStatus.Inherited)
+            {
+                log.Info($"[promote] [{i + 1}/{jobs.Count}] {fileName} (inherited — skipped)");
+                continue;
+            }
+
             log.Info($"[promote] [{i + 1}/{jobs.Count}] {fileName}");
             log.Info($"[promote]   input:  {job.InputPath}");
             log.Info($"[promote]   output: {job.OutputPath}");
@@ -187,7 +204,17 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
         }
         else
         {
-            var archiveRc = ArchiveIncoming(target, run, promotedInputs, archiveBase, incomingBase, log);
+            // For non-TV targets the archive and cleanup passes work file-by-file, so
+            // inherited files must be included alongside newly-promoted ones.  If the
+            // prior run was cancelled before its own cleanup ran, their staging copies
+            // and incoming originals may still be on disk and need to be swept up here.
+            // For TV the show-root directory delete already covers everything, so the
+            // extra entries are harmless (File.Exists guards prevent double-work).
+            var allInputsForPostProcessing = new List<string>(promotedInputs);
+            allInputsForPostProcessing.AddRange(
+                jobs.Where(j => j.Status == StepStatus.Inherited).Select(j => j.InputPath));
+
+            var archiveRc = ArchiveIncoming(target, run, allInputsForPostProcessing, archiveBase, incomingBase, log);
             if (archiveRc != 0)
                 return archiveRc;
 
@@ -200,12 +227,13 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
                 await discord.NotifyAsync("⚠️ Step 3 of 3: Promote to Library archive prune", pruneMsg, run.LogFile, ct);
             }
 
-            CleanupStaging(target, targetMode, run.Kind, promotedInputs, log);
+            CleanupStaging(target, targetMode, run.Kind, allInputsForPostProcessing, log);
         }
 
+        var inheritedSuffix = inheritedCount > 0 ? $" inherited={inheritedCount}" : "";
         var doneMsg = run.Kind == Kind.Tv
-            ? $"{targetLabel}: {labelValue} | run_id={run.RunId} | created={createdCount} overwritten={overwrittenCount} failed=0"
-            : $"{targetLabel}: {labelValue} | run_id={run.RunId} | created={createdCount} overwritten={overwrittenCount} failed=0";
+            ? $"{targetLabel}: {labelValue} | run_id={run.RunId} | created={createdCount} overwritten={overwrittenCount} failed=0{inheritedSuffix}"
+            : $"{targetLabel}: {labelValue} | run_id={run.RunId} | created={createdCount} overwritten={overwrittenCount} failed=0{inheritedSuffix}";
 
         await discord.NotifyAsync("✅ Step 3 of 3: Promote to Library finished", doneMsg, run.LogFile, ct);
         return 0;
@@ -479,23 +507,26 @@ public class NativePromoteRunner(IDiscordNotifier discord) : IPromoteRunner
         if (onProgress is null) return;
 
         var processed = 0;
-        var failed = 0;
-        var skipped = 0;
+        var failed    = 0;
+        var skipped   = 0;
+        var inherited = 0;
         foreach (var job in jobs)
         {
-            if (job.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped) processed++;
-            if (job.Status == StepStatus.Failed) failed++;
-            if (job.Status == StepStatus.Skipped) skipped++;
+            if (job.Status is StepStatus.Complete or StepStatus.Failed or StepStatus.Skipped or StepStatus.Inherited) processed++;
+            if (job.Status == StepStatus.Failed)    failed++;
+            if (job.Status == StepStatus.Skipped)   skipped++;
+            if (job.Status == StepStatus.Inherited) inherited++;
         }
 
         onProgress(new StepFileProgress
         {
-            TotalFiles = jobs.Count,
+            TotalFiles     = jobs.Count,
             ProcessedFiles = processed,
-            FailedFiles = failed,
-            SkippedFiles = skipped,
-            CurrentFile = currentFile,
-            Files = jobs.AsReadOnly()
+            FailedFiles    = failed,
+            SkippedFiles   = skipped,
+            InheritedFiles = inherited,
+            CurrentFile    = currentFile,
+            Files          = jobs.AsReadOnly()
         });
     }
 }
