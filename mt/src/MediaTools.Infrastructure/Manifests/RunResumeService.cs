@@ -99,7 +99,7 @@ public class RunResumeService(string runsDirectory) : IRunResumeService
             catch (Exception ex)
             {
                 // Skip unreadable / malformed manifests
-                Console.Error.WriteLine($"[WARN] RunResumeService: could not load run manifest: {ex.Message}");
+                Console.Error.WriteLine($"[WARN] RunResumeService: could not load run manifest {file} : {ex.Message}");
             }
 
             if (m is not null)
