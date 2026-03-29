@@ -8,8 +8,8 @@ public static class PipelineCommand
 {
     public static readonly Option<bool> StopOnError = new(
         "--stop-on-error",
-        () => true,
-        "Halt the pipeline when any step returns a non-zero exit code");
+        () => false,
+        "Halt the pipeline immediately when any step returns a non-zero exit code (default: continue and process files that succeeded)");
 
     public static readonly Option<bool> Notify = new(
         "--notify",

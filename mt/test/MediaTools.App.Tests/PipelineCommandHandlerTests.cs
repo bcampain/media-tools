@@ -86,6 +86,66 @@ public class PipelineCommandHandlerTests
             => new HashSet<string>();
     }
 
+    // Simulates handbrake where every file fails (exit 1, no successes).
+    private class FailingHandbrakeRunner : IHandbrakeRunner
+    {
+        public Task<int> RunAsync(
+            string target, PipelineRun run, HandbrakeScriptOptions options,
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+            IReadOnlySet<string>? inheritedFiles = null)
+        {
+            onProgress?.Invoke(new StepFileProgress
+            {
+                TotalFiles     = 1,
+                ProcessedFiles = 1,
+                FailedFiles    = 1,
+                Files          = [new FileJobRecord
+                {
+                    InputPath  = "/incoming/movies/test.mkv",
+                    OutputPath = "/staging/movies/test.norm.mp4",
+                    Status     = StepStatus.Failed,
+                    ExitCode   = 1
+                }]
+            });
+            return Task.FromResult(1);
+        }
+    }
+
+    // Simulates handbrake where one file succeeds and one fails (exit 1, partial success).
+    private class PartiallyFailingHandbrakeRunner : IHandbrakeRunner
+    {
+        public Task<int> RunAsync(
+            string target, PipelineRun run, HandbrakeScriptOptions options,
+            Action<StepFileProgress>? onProgress, ILogSink log, CancellationToken ct,
+            IReadOnlySet<string>? inheritedFiles = null)
+        {
+            onProgress?.Invoke(new StepFileProgress
+            {
+                TotalFiles     = 2,
+                ProcessedFiles = 2,
+                FailedFiles    = 1,
+                Files          =
+                [
+                    new FileJobRecord
+                    {
+                        InputPath  = "/incoming/movies/good.mkv",
+                        OutputPath = "/staging/movies/good.norm.mp4",
+                        Status     = StepStatus.Complete,
+                        ExitCode   = 0
+                    },
+                    new FileJobRecord
+                    {
+                        InputPath  = "/incoming/movies/bad.mkv",
+                        OutputPath = "/staging/movies/bad.norm.mp4",
+                        Status     = StepStatus.Failed,
+                        ExitCode   = 1
+                    }
+                ]
+            });
+            return Task.FromResult(1);
+        }
+    }
+
     // Simulates a runner being interrupted mid-execution (e.g. Ctrl+C).
     // Calls ct.ThrowIfCancellationRequested() so a pre-cancelled token causes
     // an OperationCanceledException the same way a real runner would produce it.
@@ -115,6 +175,22 @@ public class PipelineCommandHandlerTests
     // that captures every manifest snapshot so we can assert on the final status.
     private static PipelineCommandHandler MakeCancellingHandler(CapturingManifestWriter writer) => new(
         new CancellingHandbrakeRunner(),
+        new NullNormalizeRunner(),
+        new NullPromoteRunner(),
+        new NullDiscordNotifier(),
+        writer,
+        new NullRunResumeService());
+
+    private static PipelineCommandHandler MakeFailingHandbrakeHandler(CapturingManifestWriter writer) => new(
+        new FailingHandbrakeRunner(),
+        new NullNormalizeRunner(),
+        new NullPromoteRunner(),
+        new NullDiscordNotifier(),
+        writer,
+        new NullRunResumeService());
+
+    private static PipelineCommandHandler MakePartiallyFailingHandbrakeHandler(CapturingManifestWriter writer) => new(
+        new PartiallyFailingHandbrakeRunner(),
         new NullNormalizeRunner(),
         new NullPromoteRunner(),
         new NullDiscordNotifier(),
@@ -228,6 +304,102 @@ public class PipelineCommandHandlerTests
         var steps = writer.Last!.Steps;
         steps.Should().Contain(s => s.Name == "handbrake" && s.Status == StepStatus.Cancelled);
         steps.Should().NotContain(s => s.Status == StepStatus.Running);
+    }
+
+    // ── StopOnError=false: all files fail → run is Failed ────────────────────
+
+    [Fact]
+    public async Task HandleAsync_AllFilesFailHandbrake_StopOnErrorFalse_ReturnsExitCode1()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = false };
+
+        var rc = await handler.HandleAsync(options, CancellationToken.None);
+
+        rc.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task HandleAsync_AllFilesFailHandbrake_StopOnErrorFalse_WritesFailedManifest()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = false };
+
+        await handler.HandleAsync(options, CancellationToken.None);
+
+        // No files succeeded, so run-level status must be Failed.
+        writer.Last.Should().NotBeNull();
+        writer.Last!.Status.Should().Be(RunStatus.Failed);
+        writer.Last!.ExitCode.Should().Be(1);
+        writer.Last!.CompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task HandleAsync_AllFilesFailHandbrake_StopOnErrorFalse_CompletesAllSteps()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = false };
+
+        await handler.HandleAsync(options, CancellationToken.None);
+
+        // normalize and promote must have been attempted (not left Pending).
+        var steps = writer.Last!.Steps;
+        steps.Should().Contain(s => s.Name == "handbrake"  && s.Status == StepStatus.Failed);
+        steps.Should().Contain(s => s.Name == "normalize"  && s.Status == StepStatus.Complete);
+        steps.Should().Contain(s => s.Name == "promote"    && s.Status == StepStatus.Complete);
+    }
+
+    // ── StopOnError=false: some files fail → run is Complete ─────────────────
+
+    [Fact]
+    public async Task HandleAsync_SomeFilesFailHandbrake_StopOnErrorFalse_ReturnsZero()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakePartiallyFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = false };
+
+        var rc = await handler.HandleAsync(options, CancellationToken.None);
+
+        rc.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SomeFilesFailHandbrake_StopOnErrorFalse_WritesCompleteManifest()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakePartiallyFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = false };
+
+        await handler.HandleAsync(options, CancellationToken.None);
+
+        // At least one file succeeded, so the run is considered complete.
+        writer.Last.Should().NotBeNull();
+        writer.Last!.Status.Should().Be(RunStatus.Complete);
+        writer.Last!.ExitCode.Should().Be(0);
+        writer.Last!.CompletedAt.Should().NotBeNull();
+        // The handbrake step itself still reflects that it had failures.
+        writer.Last!.Steps.Should().Contain(s => s.Name == "handbrake" && s.Status == StepStatus.Failed);
+    }
+
+    // ── StopOnError=true: halt immediately on handbrake failures ─────────────
+
+    [Fact]
+    public async Task HandleAsync_HandbrakeFailures_StopOnErrorTrue_HaltsPipeline()
+    {
+        var writer  = new CapturingManifestWriter();
+        var handler = MakeFailingHandbrakeHandler(writer);
+        var options = OptionsFor("/incoming/tv/My Show", dryRun: false) with { Yes = true, StopOnError = true };
+
+        var rc = await handler.HandleAsync(options, CancellationToken.None);
+
+        rc.Should().Be(1);
+        // normalize and promote must remain Pending (never started)
+        var steps = writer.Last!.Steps;
+        steps.Should().Contain(s => s.Name == "normalize" && s.Status == StepStatus.Pending);
+        steps.Should().Contain(s => s.Name == "promote"   && s.Status == StepStatus.Pending);
     }
 
     // ── Valid target / dry-run tests ─────────────────────────────────────────

@@ -165,6 +165,8 @@ public class PipelineCommandHandler(
         };
         manifests.Write(manifest);
 
+        var anyStepHadFailures = false;
+
         try
         {
 
@@ -207,18 +209,31 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                pipelineLog.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
-                manifests.Write(manifest);
+                if (options.StopOnError)
+                {
+                    pipelineLog.Error($"[pipeline] handbrake failed (exit {rc}). Pipeline halted.");
+                    manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
+                    manifests.Write(manifest);
+
+                    if (options.Notify)
+                        await discord.NotifyAsync(
+                            "❌ mt pipeline: Failed at handbrake",
+                            $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
+                    return rc;
+                }
+
+                pipelineLog.Warn($"[pipeline] handbrake completed with failures (exit {rc}). Continuing pipeline for files that succeeded.");
+                anyStepHadFailures = true;
 
                 if (options.Notify)
                     await discord.NotifyAsync(
-                        "❌ mt pipeline: Failed at handbrake",
-                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
-                return rc;
+                        "⚠️ mt pipeline: handbrake had file failures",
+                        $"Exit code {rc} — RunId {runId}\nContinuing pipeline for files that succeeded.", manifest.LogFile, ct);
             }
-
-            pipelineLog.Info("[pipeline] [1/3] handbrake complete.");
+            else
+            {
+                pipelineLog.Info("[pipeline] [1/3] handbrake complete.");
+            }
         }
 
         // ── Step 2: Normalize ────────────────────────────────────────────────
@@ -256,18 +271,31 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                pipelineLog.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
-                manifests.Write(manifest);
+                if (options.StopOnError)
+                {
+                    pipelineLog.Error($"[pipeline] normalize failed (exit {rc}). Pipeline halted.");
+                    manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
+                    manifests.Write(manifest);
+
+                    if (options.Notify)
+                        await discord.NotifyAsync(
+                            "❌ mt pipeline: Failed at normalize",
+                            $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
+                    return rc;
+                }
+
+                pipelineLog.Warn($"[pipeline] normalize completed with failures (exit {rc}). Continuing pipeline for files that succeeded.");
+                anyStepHadFailures = true;
 
                 if (options.Notify)
                     await discord.NotifyAsync(
-                        "❌ mt pipeline: Failed at normalize",
-                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
-                return rc;
+                        "⚠️ mt pipeline: normalize had file failures",
+                        $"Exit code {rc} — RunId {runId}\nContinuing pipeline for files that succeeded.", manifest.LogFile, ct);
             }
-
-            pipelineLog.Info("[pipeline] [2/3] normalize complete.");
+            else
+            {
+                pipelineLog.Info("[pipeline] [2/3] normalize complete.");
+            }
         }
 
         // ── Step 3: Promote ──────────────────────────────────────────────────
@@ -302,18 +330,59 @@ public class PipelineCommandHandler(
 
             if (rc != 0)
             {
-                pipelineLog.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
-                manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
+                if (options.StopOnError)
+                {
+                    pipelineLog.Error($"[pipeline] promote failed (exit {rc}). Pipeline halted.");
+                    manifest = manifest.WithStatus(RunStatus.Failed, rc, DateTime.UtcNow);
+                    manifests.Write(manifest);
+
+                    if (options.Notify)
+                        await discord.NotifyAsync(
+                            "❌ mt pipeline: Failed at promote",
+                            $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
+                    return rc;
+                }
+
+                pipelineLog.Warn($"[pipeline] promote completed with failures (exit {rc}). Pipeline finished with partial success.");
+                anyStepHadFailures = true;
+
+                if (options.Notify)
+                    await discord.NotifyAsync(
+                        "⚠️ mt pipeline: promote had file failures",
+                        $"Exit code {rc} — RunId {runId}\nPipeline finished with partial success.", manifest.LogFile, ct);
+            }
+            else
+            {
+                pipelineLog.Info("[pipeline] [3/3] promote complete.");
+            }
+        }
+
+        if (anyStepHadFailures)
+        {
+            if (AnyFileReachedLastStep(manifest))
+            {
+                pipelineLog.Warn("[pipeline] Pipeline completed. Some files had failures and were skipped.");
+                manifest = manifest.WithStatus(RunStatus.Complete, 0, DateTime.UtcNow);
                 manifests.Write(manifest);
 
                 if (options.Notify)
                     await discord.NotifyAsync(
-                        "❌ mt pipeline: Failed at promote",
-                        $"Exit code {rc} — RunId {runId}", manifest.LogFile, ct);
-                return rc;
+                        "✅ mt pipeline: Complete (with some file failures)",
+                        $"Some files failed but at least one succeeded — RunId {runId}", null, ct);
+
+                return 0;
             }
 
-            pipelineLog.Info("[pipeline] [3/3] promote complete.");
+            pipelineLog.Error("[pipeline] Pipeline completed but no files were successfully processed.");
+            manifest = manifest.WithStatus(RunStatus.Failed, 1, DateTime.UtcNow);
+            manifests.Write(manifest);
+
+            if (options.Notify)
+                await discord.NotifyAsync(
+                    "❌ mt pipeline: Failed — no files succeeded",
+                    $"All files failed — RunId {runId}", null, ct);
+
+            return 1;
         }
 
         pipelineLog.Info("[pipeline] All steps completed.");
@@ -350,6 +419,29 @@ public class PipelineCommandHandler(
             // matching what bash scripts return when interrupted the same way.
             return 130;
         }
+    }
+
+    // Returns true if the last pipeline step that tracked per-file progress contains
+    // at least one file that completed successfully (Complete, Skipped, or Inherited).
+    // Used to decide whether a run with partial failures should be stamped Complete or Failed:
+    // if any file made it all the way through, the run is considered successful overall.
+    //
+    // Falls back to step-level completion status when no step reported per-file progress
+    // (e.g. when running against test doubles that don't invoke the onProgress callback).
+    private static bool AnyFileReachedLastStep(PipelineRunManifest manifest)
+    {
+        var lastFiles = manifest.Steps
+            .Where(s => s.Status is StepStatus.Complete or StepStatus.Failed
+                     && s.FileProgress?.Files is not null)
+            .Select(s => s.FileProgress!.Files!)
+            .LastOrDefault();
+
+        if (lastFiles is not null)
+            return lastFiles.Any(f =>
+                f.Status is StepStatus.Complete or StepStatus.Skipped or StepStatus.Inherited);
+
+        // No per-file tracking available — treat any completed step as a success signal.
+        return manifest.Steps.Any(s => s.Status == StepStatus.Complete);
     }
 
     // Maps the --step / --until string values to the PipelineStep enum.
