@@ -34,10 +34,6 @@ RUN apt-get update && \
       vainfo \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy bash scripts
-COPY bin/ /usr/local/bin/
-RUN chmod +x /usr/local/bin/*
-
 # Copy mt CLI (self-contained binary, built locally via ./build.sh)
 COPY publish/ /usr/local/lib/mt/
 RUN ln -s /usr/local/lib/mt/mt /usr/local/bin/mt

@@ -48,6 +48,39 @@ public static class VideoPathMapper
     }
 
     /// <summary>
+    /// Name of the sibling folder that may hold external subtitle files for the
+    /// videos in the same directory (common in TV release layouts).
+    /// </summary>
+    public const string ExternalSubsDirName = "Subs";
+
+    /// <summary>
+    /// Accepted external-subtitle suffixes, in priority order. 
+    /// </summary>
+    private static readonly string[] ExternalSubtitleSuffixes = [".srt", ".en.srt"];
+
+    /// <summary>
+    /// Returns the candidate locations of a video's external subtitle file, in
+    /// priority order: a <c>Subs/</c> folder next to the video, containing an .srt
+    /// with the same stem, optionally tagged ".en". The caller picks the first that exists.
+    ///
+    /// Example:
+    ///   input: /incoming/tv/Breaking Bad/Season 1/S01E01.mkv
+    ///   → [ .../Season 1/Subs/S01E01.srt, .../Season 1/Subs/S01E01.en.srt ]
+    ///
+    /// Path.GetFileNameWithoutExtension strips only the LAST extension, so
+    /// "Show.Name.S01E01.1080p.mkv" → stem "Show.Name.S01E01.1080p".
+    /// </summary>
+    public static IReadOnlyList<string> ExternalSubtitleCandidates(string inputFile)
+    {
+        var subsDir = Path.Combine(Path.GetDirectoryName(inputFile)!, ExternalSubsDirName);
+        var stem    = Path.GetFileNameWithoutExtension(inputFile);
+
+        // [.. x] is a C# 12 collection expression with a spread: it materializes the
+        // lazy LINQ sequence into the return type (same effect as .ToList()).
+        return [.. ExternalSubtitleSuffixes.Select(suffix => Path.Combine(subsDir, stem + suffix))];
+    }
+
+    /// <summary>
     /// Maps a staging file path to its expected library output path.
     /// Used by the native promote step.
     ///
