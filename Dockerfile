@@ -1,4 +1,4 @@
-# /srv/media-tools/Dockerfile
+# /srv/dev/media-tools/Dockerfile
 # The mt CLI binary is built locally (or via CI) before running docker compose build.
 # Run ./build.sh to publish and build the image in one step.
 
