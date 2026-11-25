@@ -25,6 +25,8 @@ namespace MediaTools.App.Handbrake;
 ///   - Quality (CRF):   from options.Quality (default 23 in PipelineCommandHandler)
 ///   - Encoder preset:  from options.Preset  (default "fast")
 ///   - Audio:           copy AAC/AC3/EAC3/DTS tracks; fallback-encode others to AAC
+///   - Subtitles:       all embedded tracks, plus an external Subs/&lt;stem&gt;[.en].srt if present
+///                      (soft, English, not default). See BuildHandBrakeArgs.
 ///
 /// Progress is reported after each file completes (or fails), and once at the start
 /// with all files as "pending" so the dashboard can show the total file count immediately.
@@ -158,11 +160,15 @@ public class NativeHandbrakeRunner(
                 continue;
             }
 
+            // ── Resolve external subtitle (Subs/<stem>[.en].srt) ───────────────────
+            var srtToEmbed = await ResolveExternalSubtitleAsync(
+                job.InputPath, target, run, i, jobs.Count, log, ct);
+
             // ── Run HandBrakeCLI ──────────────────────────────────────────────
             int rc;
             try
             {
-                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, options, log, ct);
+                rc = await EncodeFileAsync(hbPath, job.InputPath, job.OutputPath, srtToEmbed, options, log, ct);
             }
             catch (OperationCanceledException)
             {
@@ -190,6 +196,8 @@ public class NativeHandbrakeRunner(
                                Created: {Path.GetFileName(job.OutputPath)}
                                Original: {Path.GetFileName(job.InputPath)}
                                """;
+                if (srtToEmbed is not null)
+                    createdMessage += $"\nSubs: external {Path.GetFileName(srtToEmbed)}";
                 await discord.NotifyAsync(createdTitle, createdMessage, null, ct);
             }
             else
@@ -221,17 +229,67 @@ public class NativeHandbrakeRunner(
         return failedCount > 0 ? 1 : 0;
     }
 
+    // ─── External subtitles ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Looks for an external subtitle at the conventional path
+    /// (VideoPathMapper.ExternalSubtitleCandidates → &lt;video dir&gt;/Subs/&lt;stem&gt;.srt or .en.srt).
+    ///
+    /// Returns the .srt path to embed, or null if there isn't one. Three outcomes:
+    ///   - SRT exists                     → return it (info log)
+    ///   - Subs/ exists but no match      → null + warn log + ⚠️ Discord (likely a naming mismatch)
+    ///   - no Subs/ folder at all         → null + info log (the normal case for most sources)
+    ///
+    /// Matching is exact/case-sensitive on Linux ("Subs", ".srt").
+    /// </summary>
+    private async Task<string?> ResolveExternalSubtitleAsync(
+        string            inputPath,
+        string            target,
+        PipelineRun       run,
+        int               index,
+        int               total,
+        ILogSink          log,
+        CancellationToken ct)
+    {
+        var candidates = VideoPathMapper.ExternalSubtitleCandidates(inputPath);
+
+        // First candidate that exists wins (".srt" before ".en.srt").
+        // FirstOrDefault returns null when nothing matches.
+        var srtPath = candidates.FirstOrDefault(File.Exists);
+        if (srtPath is not null)
+        {
+            log.Info($"[handbrake]   subs:   external {srtPath}");
+            return srtPath;
+        }
+
+        if (Directory.Exists(Path.GetDirectoryName(candidates[0])))
+        {
+            var expected = string.Join(" or ", candidates.Select(Path.GetFileName));
+            log.Warn($"[handbrake]   subs:   {VideoPathMapper.ExternalSubsDirName}/ folder present but no {expected}");
+            await discord.NotifyAsync(
+                $"⚠️ HandBrake: Missing external subtitle ({index + 1}/{total})",
+                $"Target: {target} | run_id={run.RunId}\n" +
+                $"No {expected} in {VideoPathMapper.ExternalSubsDirName}/ for: {Path.GetFileName(inputPath)}",
+                null, ct);
+            return null;
+        }
+
+        log.Info("[handbrake]   subs:   none");
+        return null;
+    }
+
     // ─── Encoding ─────────────────────────────────────────────────────────────
 
     private async Task<int> EncodeFileAsync(
         string                 hbPath,
         string                 inputPath,
         string                 outputPath,
+        string?                externalSrt,
         HandbrakeScriptOptions options,
         ILogSink               log,
         CancellationToken      ct)
     {
-        var args = BuildHandBrakeArgs(inputPath, outputPath, options);
+        var args = BuildHandBrakeArgs(inputPath, outputPath, externalSrt, options);
         log.Info($"[handbrake]   cmd: {hbPath} {args}");
 
         var psi = new ProcessStartInfo(hbPath, args)
@@ -303,9 +361,18 @@ public class NativeHandbrakeRunner(
     ///                    VOBSUB from DVDs) cannot be stored as selectable tracks in MP4 and
     ///                    will be silently dropped by HandBrake. If sources are Blu-ray rips
     ///                    with PGS subs, consider MKV output or burning them in instead.
+    ///
+    ///                    External SRT: when <paramref name="externalSrt"/> is non-null
+    ///                    (a Subs/&lt;stem&gt;[.en].srt next to the source), it is added as one
+    ///                    extra soft track alongside the embedded ones:
+    ///                      --srt-file     the .srt path
+    ///                      --srt-lang     eng (players label it "English")
+    ///                      --srt-codeset  UTF-8, explicit so we don't rely on HandBrake's guess
+    ///                    --srt-default is intentionally omitted (track is off unless chosen)
+    ///                    and --srt-burn is omitted (stays selectable, not burned in).
     /// </summary>
     private static string BuildHandBrakeArgs(
-        string inputPath, string outputPath, HandbrakeScriptOptions options)
+        string inputPath, string outputPath, string? externalSrt, HandbrakeScriptOptions options)
     {
         // When HANDBRAKE_USE_QSV=true (set in compose.yml), use Intel Quick Sync Video
         // hardware encoding instead of software x265. QSV offloads encode to the iGPU,
@@ -338,6 +405,11 @@ public class NativeHandbrakeRunner(
             // Include chapter markers if present in the source
             "--markers"
         };
+
+        // Optional external subtitle — collection expression ([...]) is C# 12 syntax
+        // for building the IEnumerable<string> passed to AddRange.
+        if (externalSrt is not null)
+            parts.AddRange(["--srt-file", Quote(externalSrt), "--srt-lang", "eng", "--srt-codeset", "UTF-8"]);
 
         return string.Join(" ", parts);
     }
