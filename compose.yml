@@ -1,6 +1,10 @@
 services:
   media-tools:
     build: .
+    # The server is x86_64 and the Intel QSV driver packages are amd64-only.
+    # Declaring the platform makes builds on Apple Silicon (via Colima +
+    # Rosetta) produce the same image the server runs. No-op on the server.
+    platform: linux/amd64
     image: media-tools:0.2
     container_name: media-tools
     environment:

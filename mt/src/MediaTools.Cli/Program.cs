@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
+using MediaTools.App.Download;
 using MediaTools.App.FileSystem;
 using MediaTools.App.Handbrake;
 using MediaTools.App.Normalize;
@@ -50,6 +51,7 @@ services.AddSingleton<VideoFileScanner>();
 services.AddSingleton<IHandbrakeRunner, NativeHandbrakeRunner>();
 services.AddSingleton<INormalizeRunner, NativeNormalizeRunner>();
 services.AddSingleton<IPromoteRunner,   NativePromoteRunner>();
+services.AddSingleton<IDownloadRunner,  NativeDownloadRunner>();
 services.AddSingleton<IDiscordNotifier, DiscordNotifier>();
 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL")))
     Console.Error.WriteLine("[WARN] DISCORD_WEBHOOK_URL is not set — Discord notifications are disabled");
@@ -60,6 +62,7 @@ services.AddSingleton<NormalizeCommandHandler>();
 services.AddSingleton<PromoteCommandHandler>();
 services.AddSingleton<NotifyDiscordCommandHandler>();
 services.AddSingleton<PipelineCommandHandler>();
+services.AddSingleton<DownloadCommandHandler>();
 
 var sp = services.BuildServiceProvider();
 
@@ -71,6 +74,7 @@ root.AddCommand(NormalizeCommand.Build(sp.GetRequiredService<NormalizeCommandHan
 root.AddCommand(PromoteCommand.Build(sp.GetRequiredService<PromoteCommandHandler>()));
 root.AddCommand(NotifyDiscordCommand.Build(sp.GetRequiredService<NotifyDiscordCommandHandler>()));
 root.AddCommand(PipelineCommand.Build(sp.GetRequiredService<PipelineCommandHandler>()));
+root.AddCommand(DownloadCommand.Build(sp.GetRequiredService<DownloadCommandHandler>()));
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 var parser = new CommandLineBuilder(root)
