@@ -16,6 +16,28 @@
 - Preserves current, proven bash behavior.
 - C# will now perform the orchestration: input validation, scoping, logging, consistent UX, plan/dry-run, and calling notify-discord on events (though the majority of Discord notifications will still occur from the bash scrripts in v1).
 
+## Deploying
+
+There is no CI/CD for this repo; deploys are manual on rugServer. (The separate `mt-dashboard` project is the one that auto-deploys from GitHub.)
+
+```bash
+# on rugServer
+cd /srv/dev/media-tools
+git fetch
+git checkout <branch>      # main, or a feature branch to test it
+git pull
+./build.sh                 # dotnet publish → ./publish, then docker compose build
+```
+
+Then run the pipeline as usual.
+
+Things to know:
+
+- **`build.sh` is the deploy step.** The Dockerfile copies the prebuilt `publish/` folder (gitignored), so `docker compose build` on its own fails on a fresh checkout. `build.sh` needs the .NET SDK installed on the server.
+- **One image tag.** `compose.yml` pins `image: media-tools:0.2`, so building from a feature branch replaces the image your real ingests use until you rebuild from `main`.
+- **Long-running container?** If the container was started with `docker compose up -d`, run `docker compose up -d` again after `build.sh` so it is recreated from the new image. `docker compose run` picks up the new image automatically.
+- **Rollback:** `git checkout main && git pull && ./build.sh`.
+
 ## Command-line options
 
 ### Common options on every command:
