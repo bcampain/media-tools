@@ -88,6 +88,9 @@ public class NativeHandbrakeRunner(
 
         log.Info($"[handbrake] Found {inputFiles.Count} file(s) to encode.");
 
+        // ── Strip commas from incoming filenames ──────────────────────────────
+        inputFiles = SanitizeIncomingFileNames(inputFiles, log);
+
         // ── Build the job list ────────────────────────────────────────────────
         // Files present in inheritedFiles were completed in a prior run and are
         // pre-marked as Inherited so they are skipped without re-encoding.
@@ -164,6 +167,22 @@ public class NativeHandbrakeRunner(
             var srtToEmbed = await ResolveExternalSubtitleAsync(
                 job.InputPath, target, run, i, jobs.Count, log, ct);
 
+            // Handle edge-case where folder name has a comma
+            if (srtToEmbed is not null && srtToEmbed.Contains(','))
+            {
+                log.Error($"[handbrake]   ✗ Subtitle path contains a comma (from a folder name): {srtToEmbed}");
+                log.Error("[handbrake]     HandBrake's --srt-file treats commas as a list separator. Rename the folder and re-run.");
+                jobs[i] = jobs[i] with { Status = StepStatus.Failed, CompletedAt = DateTime.UtcNow, ExitCode = 1 };
+                ReportProgress(onProgress, jobs, currentFile: null);
+                failedCount++;
+                await discord.NotifyAsync(
+                    $"❌ HandBrake: Failed to process file ({i + 1}/{jobs.Count})",
+                    $"Target: {target} | run_id={run.RunId}\nFailed file: {fileName}\n" +
+                    "Reason: a folder in the subtitle path contains a comma, which HandBrake can't accept. Rename the folder.",
+                    run.LogFile, ct);
+                continue;
+            }
+
             // ── Run HandBrakeCLI ──────────────────────────────────────────────
             int rc;
             try
@@ -227,6 +246,76 @@ public class NativeHandbrakeRunner(
         await discord.NotifyAsync("✅ Step 1 of 3: HandBrake finished", completeMessage, run.LogFile, ct);
 
         return failedCount > 0 ? 1 : 0;
+    }
+
+    // ─── Filename sanitizing ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renames incoming video files (and their Subs/ .srt files) in place so they
+    /// contain no commas, using FileNameSanitizer.RemoveCommas. Returns the updated,
+    /// re-sorted path list.
+    /// </summary>
+    private static IReadOnlyList<string> SanitizeIncomingFileNames(
+        IReadOnlyList<string> inputFiles, ILogSink log)
+    {
+        var result = new List<string>(inputFiles.Count);
+
+        foreach (var original in inputFiles)
+        {
+            var dir       = Path.GetDirectoryName(original)!;
+            var cleanName = FileNameSanitizer.RemoveCommas(Path.GetFileName(original));
+            var sanitized = Path.Combine(dir, cleanName);
+
+            if (sanitized == original)
+            {
+                result.Add(original);
+                continue;
+            }
+
+            if (File.Exists(sanitized))
+            {
+                log.Warn($"[handbrake] Cannot remove commas from {original}: {cleanName} already exists. Keeping original name.");
+                result.Add(original);
+                continue;
+            }
+
+            try
+            {
+                File.Move(original, sanitized);
+                log.Info($"[handbrake] renamed (commas removed): {original} → {sanitized}");
+
+                // Move matching subtitles alongside the video (same index = same suffix).
+                var oldSrts = VideoPathMapper.ExternalSubtitleCandidates(original);
+                var newSrts = VideoPathMapper.ExternalSubtitleCandidates(sanitized);
+                for (var s = 0; s < oldSrts.Count; s++)
+                {
+                    if (!File.Exists(oldSrts[s])) continue;
+
+                    if (File.Exists(newSrts[s]))
+                    {
+                        log.Warn($"[handbrake] Not renaming {oldSrts[s]}: {Path.GetFileName(newSrts[s])} already exists.");
+                        continue;
+                    }
+
+                    File.Move(oldSrts[s], newSrts[s]);
+                    log.Info($"[handbrake] renamed (commas removed): {oldSrts[s]} → {newSrts[s]}");
+                }
+
+                result.Add(sanitized);
+            }
+            catch (Exception ex)
+            {
+                // If the video move itself failed, it's still at its original path.
+                // If only a subtitle move failed, the video was already renamed.
+                var current = File.Exists(sanitized) ? sanitized : original;
+                log.Warn($"[handbrake] Rename failed for {original}: {ex.Message}. Continuing with {current}.");
+                result.Add(current);
+            }
+        }
+
+        // Renaming can change sort order; keep processing deterministic (matches VideoFileScanner).
+        result.Sort(StringComparer.Ordinal);
+        return result;
     }
 
     // ─── External subtitles ───────────────────────────────────────────────────
@@ -406,8 +495,7 @@ public class NativeHandbrakeRunner(
             "--markers"
         };
 
-        // Optional external subtitle — collection expression ([...]) is C# 12 syntax
-        // for building the IEnumerable<string> passed to AddRange.
+        // Optional external subtitle handling
         if (externalSrt is not null)
             parts.AddRange(["--srt-file", Quote(externalSrt), "--srt-lang", "eng", "--srt-codeset", "UTF-8"]);
 
