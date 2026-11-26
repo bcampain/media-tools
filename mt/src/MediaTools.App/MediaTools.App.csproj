@@ -6,6 +6,10 @@
     <ProjectReference Include="..\MediaTools.Scripts\MediaTools.Scripts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="MediaTools.App.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
