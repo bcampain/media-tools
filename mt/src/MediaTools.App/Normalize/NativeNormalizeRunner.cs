@@ -252,7 +252,13 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
                 // Two-pass: measure (pass 1) then apply with measurements (pass 2).
                 var measure = await MeasureAsync(ffmpegPath, job.InputPath, options, addStereo, inputOptions, log, ct);
 
-                if (measure.IsSilent)
+                // Check for a crashed measure pass BEFORE the silent check.
+                if (measure.FailedExitCode is int measureRc)
+                {
+                    log.Error("[normalize]   Measure pass failed — not treating as silent audio.");
+                    rc = measureRc;
+                }
+                else if (measure.IsSilent)
                 {
                     // Silent/near-silent audio: ffmpeg cannot produce meaningful loudnorm
                     // output. Rename the .norm.mp4 directly to .mp4 without processing.
@@ -286,30 +292,32 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
                         null, ct);
                     continue;
                 }
-
-                // Log the measured loudness values (mirrors bash log_line output).
-                if (addStereo)
-                {
-                    log.Info($"[normalize]   measure: {fileName}");
-                    log.Info($"[normalize]     5.1 input_i={measure.Surround!.InputI} " +
-                             $"input_tp={measure.Surround.InputTp} " +
-                             $"input_lra={measure.Surround.InputLra} " +
-                             $"offset={measure.Surround.TargetOffset}");
-                    log.Info($"[normalize]     st  input_i={measure.Stereo!.InputI} " +
-                             $"input_tp={measure.Stereo.InputTp} " +
-                             $"input_lra={measure.Stereo.InputLra} " +
-                             $"offset={measure.Stereo.TargetOffset}");
-                }
                 else
                 {
-                    log.Info($"[normalize]   measure: {fileName} " +
-                             $"input_i={measure.Stereo!.InputI} " +
-                             $"input_tp={measure.Stereo.InputTp} " +
-                             $"input_lra={measure.Stereo.InputLra} " +
-                             $"offset={measure.Stereo.TargetOffset}");
-                }
+                    // Log the measured loudness values (mirrors bash log_line output).
+                    if (addStereo)
+                    {
+                        log.Info($"[normalize]   measure: {fileName}");
+                        log.Info($"[normalize]     5.1 input_i={measure.Surround!.InputI} " +
+                                 $"input_tp={measure.Surround.InputTp} " +
+                                 $"input_lra={measure.Surround.InputLra} " +
+                                 $"offset={measure.Surround.TargetOffset}");
+                        log.Info($"[normalize]     st  input_i={measure.Stereo!.InputI} " +
+                                 $"input_tp={measure.Stereo.InputTp} " +
+                                 $"input_lra={measure.Stereo.InputLra} " +
+                                 $"offset={measure.Stereo.TargetOffset}");
+                    }
+                    else
+                    {
+                        log.Info($"[normalize]   measure: {fileName} " +
+                                 $"input_i={measure.Stereo!.InputI} " +
+                                 $"input_tp={measure.Stereo.InputTp} " +
+                                 $"input_lra={measure.Stereo.InputLra} " +
+                                 $"offset={measure.Stereo.TargetOffset}");
+                    }
 
-                rc = await ApplyTwoPassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, measure, inputOptions, log, ct);
+                    rc = await ApplyTwoPassAsync(ffmpegPath, job.InputPath, tmpFile, options, addStereo, measure, inputOptions, log, ct);
+                }
             }
 
             var completedAt = DateTime.UtcNow;
@@ -546,7 +554,11 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
     private sealed record MeasureResult(
         LoudnormMeasurement? Surround,   // non-null only in surround+stereo mode
         LoudnormMeasurement? Stereo,     // present in all two-pass paths
-        bool                 IsSilent);
+        bool                 IsSilent,
+        int?                 FailedExitCode = null);
+
+    private static MeasureResult MeasureFailed(int exitCode) =>
+        new(Surround: null, Stereo: null, IsSilent: false, FailedExitCode: exitCode);
 
     /// <summary>
     /// Runs the loudnorm measurement pass (ffmpeg pass 1) for a file.
@@ -556,7 +568,8 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
     ///   • The stereo downmix (prefixed with the pan filter)
     /// This mirrors the bash script's dual measure_loudnorm() calls.
     ///
-    /// Returns MeasureResult.IsSilent = true if either measurement is invalid
+    /// Returns MeasureResult.FailedExitCode if any ffmpeg measure pass exits non-zero.
+    /// Otherwise returns MeasureResult.IsSilent = true if either measurement is invalid
     /// (input_i is -inf, null, or outside [-99, 0]).
     /// </summary>
     private async Task<MeasureResult> MeasureAsync(
@@ -571,10 +584,13 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         if (addStereo)
         {
             log.Info("[normalize]   Measuring surround (5.1) loudness...");
-            var meas51 = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, inputOptions, log, ct);
+            var (meas51, rc51) = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, inputOptions, log, ct);
+            // Bail before the stereo pass.
+            if (rc51 != 0) return MeasureFailed(rc51);
 
             log.Info("[normalize]   Measuring stereo downmix loudness...");
-            var measSt = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: StereoPanFilter, inputOptions, log, ct);
+            var (measSt, rcSt) = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: StereoPanFilter, inputOptions, log, ct);
+            if (rcSt != 0) return MeasureFailed(rcSt);
 
             if (!IsLoudnormMeasValid(meas51) || !IsLoudnormMeasValid(measSt))
                 return new MeasureResult(null, null, IsSilent: true);
@@ -584,7 +600,8 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         else
         {
             log.Info("[normalize]   Measuring loudness...");
-            var meas = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, inputOptions, log, ct);
+            var (meas, rc) = await MeasureSingleAsync(ffmpegPath, inputFile, options, preFilter: null, inputOptions, log, ct);
+            if (rc != 0) return MeasureFailed(rc);
 
             if (!IsLoudnormMeasValid(meas))
                 return new MeasureResult(null, null, IsSilent: true);
@@ -608,8 +625,10 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
     ///
     /// <paramref name="preFilter"/> is prepended to the af chain before loudnorm,
     /// which is how the stereo downmix measurement works (pan filter applied first).
+    ///
+    /// Returns ffmpeg's exit code alongside the measurement.
     /// </summary>
-    private async Task<LoudnormMeasurement?> MeasureSingleAsync(
+    private async Task<(LoudnormMeasurement? Measurement, int ExitCode)> MeasureSingleAsync(
         string                 ffmpegPath,
         string                 inputFile,
         NormalizeScriptOptions options,
@@ -640,7 +659,8 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         };
 
         using var proc = new Process { StartInfo = psi };
-        var stderrBuf = new StringBuilder();
+        var stderrBuf  = new StringBuilder();   // full stderr, needed to find the JSON block
+        var stderrTail = new StderrTail();      // short tail, only logged on failure
 
         // loudnorm prints its JSON block to stderr. Mirror it to the console so the
         // operator sees the measurement in real-time (matches bash tee /dev/stderr).
@@ -650,6 +670,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
             if (e.Data is null) return;
             Console.Error.WriteLine(e.Data);
             stderrBuf.AppendLine(e.Data);
+            stderrTail.Add(e.Data);
         };
 
         proc.Start();
@@ -660,7 +681,14 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         catch (OperationCanceledException) { proc.Kill(entireProcessTree: true); throw; }
         proc.WaitForExit();
 
-        return ExtractLoudnormJson(stderrBuf.ToString(), log);
+        if (proc.ExitCode != 0)
+        {
+            log.Error($"[normalize]   ✗ measure pass failed (exit {proc.ExitCode})");
+            stderrTail.LogTo(log);
+            return (null, proc.ExitCode);
+        }
+
+        return (ExtractLoudnormJson(stderrBuf.ToString(), log), 0);
     }
 
     /// <summary>
@@ -865,7 +893,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
     }
 
     // How many trailing stderr lines to keep for the step log when ffmpeg fails.
-    private const int StderrTailLines = 40;
+    internal const int StderrTailLines = 40;
 
     /// <summary>
     /// Launches an ffmpeg process, streams stdout and stderr to the console, and returns exit code.
@@ -887,8 +915,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
             WorkingDirectory       = "/"
         };
 
-        // Ring buffer: a Queue capped at StderrTailLines (enqueue new, dequeue oldest).
-        var stderrTail = new Queue<string>(StderrTailLines);
+        var stderrTail = new StderrTail();
 
         using var proc = new Process { StartInfo = psi };
         proc.OutputDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine(e.Data); };
@@ -896,10 +923,7 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         {
             if (e.Data is null) return;
             Console.Error.WriteLine(e.Data);
-
-            if (IsFfmpegProgressLine(e.Data)) return;
-            if (stderrTail.Count == StderrTailLines) stderrTail.Dequeue();
-            stderrTail.Enqueue(e.Data);
+            stderrTail.Add(e.Data);
         };
 
         proc.Start();
@@ -912,14 +936,43 @@ public class NativeNormalizeRunner(IDiscordNotifier discord) : INormalizeRunner
         // Flush any buffered output before returning, same as NativeHandbrakeRunner.
         proc.WaitForExit();
 
-        if (proc.ExitCode != 0 && stderrTail.Count > 0)
-        {
-            log.Error("[normalize]   ffmpeg stderr (tail):");
-            foreach (var line in stderrTail)
-                log.Error($"[normalize]     {line}");
-        }
+        if (proc.ExitCode != 0)
+            stderrTail.LogTo(log);
 
         return proc.ExitCode;
+    }
+
+    /// <summary>
+    /// Ring buffer of the last <see cref="StderrTailLines"/> non-progress ffmpeg stderr lines,
+    /// shared by the measure and apply passes so both report failures the same way.
+    ///
+    /// Implemented as a Queue capped at a fixed size: enqueue the new line, dequeue the
+    /// oldest once full. No lock is needed: Process raises ErrorDataReceived one event at a
+    /// time per stream, and callers only read the buffer after the no-arg WaitForExit(),
+    /// which guarantees every event has been delivered.
+    ///
+    /// Nested + internal so the tests can construct it directly; it isn't useful outside this runner.
+    /// </summary>
+    internal sealed class StderrTail
+    {
+        private readonly Queue<string> _lines = new(StderrTailLines);
+
+        public IReadOnlyCollection<string> Lines => _lines;
+
+        public void Add(string line)
+        {
+            if (IsFfmpegProgressLine(line)) return;
+            if (_lines.Count == StderrTailLines) _lines.Dequeue();
+            _lines.Enqueue(line);
+        }
+
+        public void LogTo(ILogSink log)
+        {
+            if (_lines.Count == 0) return;
+            log.Error("[normalize]   ffmpeg stderr (tail):");
+            foreach (var line in _lines)
+                log.Error($"[normalize]     {line}");
+        }
     }
 
     /// <summary>

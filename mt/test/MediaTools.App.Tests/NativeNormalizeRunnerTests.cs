@@ -1,5 +1,6 @@
 using FluentAssertions;
 using MediaTools.App.Normalize;
+using MediaTools.Infrastructure.Logging;
 
 namespace MediaTools.App.Tests;
 
@@ -89,5 +90,68 @@ public class NativeNormalizeRunnerTests
     public void IsFfmpegProgressLine_ErrorLines_ReturnsFalse(string line)
     {
         NativeNormalizeRunner.IsFfmpegProgressLine(line).Should().BeFalse();
+    }
+
+    // ── StderrTail ───────────────────────────────────────────────────────────
+
+    // A hand-rolled "spy" test double: records what was logged so tests can assert on it.
+    // Same no-mocking-library approach as the null stubs in PipelineCommandHandlerTests.
+    private sealed class RecordingLogSink : ILogSink
+    {
+        public List<string> Errors { get; } = [];
+        public void Info(string message)  { }
+        public void Warn(string message)  { }
+        public void Error(string message) => Errors.Add(message);
+    }
+
+    [Fact]
+    public void StderrTail_OverCapacity_KeepsOnlyNewestLines()
+    {
+        var tail  = new NativeNormalizeRunner.StderrTail();
+        var total = NativeNormalizeRunner.StderrTailLines + 10;
+
+        for (var i = 1; i <= total; i++)
+            tail.Add($"line {i}");
+
+        tail.Lines.Should().HaveCount(NativeNormalizeRunner.StderrTailLines);
+        tail.Lines.First().Should().Be("line 11");          // oldest 10 were dropped
+        tail.Lines.Last().Should().Be($"line {total}");     // newest is kept
+    }
+
+    [Fact]
+    public void StderrTail_SkipsProgressLines_KeepsErrors()
+    {
+        var tail = new NativeNormalizeRunner.StderrTail();
+
+        tail.Add("size=    2048kB time=00:01:00.00 bitrate= 279.6kbits/s");
+        tail.Add("[aac @ 0x55d0] Input contains (near) NaN/+-Inf");
+        tail.Add("frame= 1234 fps=250 q=-1.0");
+
+        tail.Lines.Should().Equal("[aac @ 0x55d0] Input contains (near) NaN/+-Inf");
+    }
+
+    [Fact]
+    public void StderrTail_LogTo_WritesHeaderThenLines()
+    {
+        var tail = new NativeNormalizeRunner.StderrTail();
+        tail.Add("Conversion failed!");
+        var log = new RecordingLogSink();
+
+        tail.LogTo(log);
+
+        log.Errors.Should().Equal(
+            "[normalize]   ffmpeg stderr (tail):",
+            "[normalize]     Conversion failed!");
+    }
+
+    [Fact]
+    public void StderrTail_LogTo_Empty_WritesNothing()
+    {
+        // No stray header when ffmpeg failed without printing anything useful.
+        var log = new RecordingLogSink();
+
+        new NativeNormalizeRunner.StderrTail().LogTo(log);
+
+        log.Errors.Should().BeEmpty();
     }
 }
